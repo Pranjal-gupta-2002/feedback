@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api/client';
 import StaffToolbar from '../components/StaffToolbar';
+import EditReviewModal from '../components/EditReviewModal';
 
 export default function AdminModerationQueue({ showToast, onQueueUpdated, searchQuery = '' }) {
   const [activeTab, setActiveTab] = useState('pending');
@@ -12,6 +13,13 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
   const [targetReviewId, setTargetReviewId] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [inspectPhoto, setInspectPhoto] = useState(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingReview, setEditingReview] = useState(null);
+
+  const handleOpenEdit = (review) => {
+    setEditingReview(review);
+    setEditModalOpen(true);
+  };
 
   const effectiveSearch = searchQuery || localSearch;
 
@@ -289,6 +297,15 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
                         <span className="text-purple-700 font-medium">{r.channel}</span>
                         <span className="text-purple-200">&bull;</span>
                         <span className="text-purple-400">{formattedDate}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEdit(r)}
+                          className="ml-auto flex items-center gap-1 text-[11px] font-bold text-[#5122fe] bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded-lg border border-purple-200 transition-colors cursor-pointer"
+                          title="Edit user review"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">edit_note</span>
+                          <span>Edit</span>
+                        </button>
                       </div>
 
                       {/* Stars & Title */}
@@ -413,6 +430,14 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
                         Escalate
                       </button>
                     </div>
+
+                    <button
+                      onClick={() => handleOpenEdit(r)}
+                      className="w-full py-1.5 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-[#5122fe] border border-purple-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs hover:border-[#5122fe]/40"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">edit_note</span>
+                      Edit Feedback
+                    </button>
                   </div>
                 </div>
               </div>
@@ -440,6 +465,21 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
       )}
 
       {/* Rejection Reason Modal */}
+      {/* Edit Review Modal */}
+      <EditReviewModal
+        isOpen={editModalOpen}
+        onClose={() => {
+          setEditModalOpen(false);
+          setEditingReview(null);
+        }}
+        review={editingReview}
+        onReviewUpdated={() => {
+          loadQueue();
+          onQueueUpdated?.();
+        }}
+        showToast={showToast}
+      />
+
       {rejectModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-purple-200 space-y-3 animate-in zoom-in-95">

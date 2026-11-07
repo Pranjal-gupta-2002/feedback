@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useStaffAuth } from '../context/StaffAuthContext';
 
 export default function StaffPasswordModal({ showToast }) {
-  const { authModalOpen, closeAuthModal, authenticate, pendingPath, STAFF_PASSCODE } = useStaffAuth();
+  const { authModalOpen, closeAuthModal, authenticate, pendingPath } = useStaffAuth();
   const [passcode, setPasscode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -46,10 +46,6 @@ export default function StaffPasswordModal({ showToast }) {
     }
   };
 
-  const handleQuickFill = () => {
-    setPasscode(STAFF_PASSCODE);
-    setError('');
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -138,20 +134,6 @@ export default function StaffPasswordModal({ showToast }) {
             )}
           </div>
 
-          {/* Quick Fill / Demo Passcode Helper */}
-          <div className="bg-purple-50/80 p-3 rounded-2xl border border-purple-200/70 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-1.5 text-purple-900/70">
-              <span className="material-symbols-outlined text-[16px] text-[#5122fe]">key</span>
-              <span>Default staff passcode: <strong className="text-purple-950 font-mono">12345</strong></span>
-            </div>
-            <button
-              type="button"
-              onClick={handleQuickFill}
-              className="text-[11px] font-bold text-[#5122fe] hover:underline cursor-pointer bg-white px-2 py-0.5 rounded-lg border border-purple-200 shadow-2xs"
-            >
-              Fill 12345
-            </button>
-          </div>
 
           {/* Buttons */}
           <div className="flex items-center gap-2.5 pt-2">

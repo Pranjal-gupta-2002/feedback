@@ -1,10 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api/client';
 
+const FALLBACK_CHANNELS = [
+  'Direct Web',
+  'Mobile App',
+  'In-Store Retail',
+  'Amazon Storefront',
+  'Partner Marketplace'
+];
+
+const FALLBACK_TAGS = [
+  'Cushioning',
+  'Comfort',
+  'Durability',
+  'Fit & Sizing',
+  'Traction',
+  'Breathability'
+];
+
 export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted, showToast }) {
   const [productsList, setProductsList] = useState([]);
-  const [tagsList, setTagsList] = useState([]);
-  const [channelsList, setChannelsList] = useState([]);
+  const [tagsList, setTagsList] = useState(FALLBACK_TAGS);
+  const [channelsList, setChannelsList] = useState(FALLBACK_CHANNELS);
   const [isCustomProduct, setIsCustomProduct] = useState(false);
   const [customSku, setCustomSku] = useState('');
   const [customName, setCustomName] = useState('');
@@ -15,13 +32,14 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
   const [body, setBody] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
-  const [channel, setChannel] = useState('');
+  const [channel, setChannel] = useState(FALLBACK_CHANNELS[0]);
   const [recommend, setRecommend] = useState(true);
   const [verifiedPurchase, setVerifiedPurchase] = useState(true);
-  const [selectedTags, setSelectedTags] = useState([]);
+  const [selectedTags, setSelectedTags] = useState([FALLBACK_TAGS[0], FALLBACK_TAGS[1]]);
   const [photos, setPhotos] = useState([]); // Up to 6 photos
   const [submitting, setSubmitting] = useState(false);
   const [submittedResult, setSubmittedResult] = useState(null);
+  const [errorMessage, setErrorMessage] = useState(null);
 
   // Load products, tags, and channels dynamically from MongoDB Atlas backend
   useEffect(() => {
@@ -43,6 +61,9 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
         if (chs && chs.length > 0) {
           setChannelsList(chs);
           setChannel(chs[0]);
+        } else {
+          setChannelsList(FALLBACK_CHANNELS);
+          setChannel(FALLBACK_CHANNELS[0]);
         }
       } catch (err) {
         console.error('Failed to load review form metadata from database:', err);
@@ -82,11 +103,21 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
 
     const filesToProcess = files.slice(0, remainingSlots);
 
-    filesToProcess.forEach(file => {
+    for (const file of filesToProcess) {
       if (!file.type.startsWith('image/')) {
-        showToast?.('Only image files are allowed.', 'error');
+        showToast?.('Only image files (JPG, PNG, WebP) are allowed.', 'error');
         return;
       }
+      if (file.size > 4 * 1024 * 1024) {
+        const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+        const msg = `Photo "${file.name}" is too large (${sizeMb}MB). Please select images under 4MB each.`;
+        setErrorMessage(msg);
+        showToast?.(msg, 'error');
+        return;
+      }
+    }
+
+    filesToProcess.forEach(file => {
 
       const reader = new FileReader();
       reader.onload = (loadEvent) => {
@@ -106,30 +137,58 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
     setPhotos(prev => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
-  const loadSamplePhotos = async () => {
-    try {
-      const approvedRevs = await api.getReviews({ status: 'approved' });
-      const dbPhotos = (approvedRevs || [])
-        .flatMap(r => (r.images && r.images.length > 0) ? r.images : (r.image_url ? [r.image_url] : []))
-        .filter(Boolean);
-      if (dbPhotos.length > 0) {
-        const uniquePhotos = Array.from(new Set(dbPhotos)).slice(0, 6);
-        setPhotos(uniquePhotos);
-      }
-    } catch (_) {}
-
-    const prodName = selectedProduct?.name || 'Footwear Model';
-    if (!title) setTitle(`Incredible comfort and responsive ride with ${prodName}`);
-    if (!body) setBody(`Midsole cushion rebound is outstanding over 25km. Outsole rubber grips wet asphalt without slipping. Lockdown through the midfoot is snug with no heel slippage.`);
-    if (!customerName) setCustomerName('Marcus Vance');
-    if (!customerEmail) setCustomerEmail('marcus@sneakers.com');
-    showToast?.('Sample review loaded from live catalog and reviews!', 'success');
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!title.trim() || !body.trim() || !customerName.trim() || !customerEmail.trim()) {
-      showToast?.('Please complete all required fields.', 'error');
+    setErrorMessage(null);
+
+    const trimmedTitle = title.trim();
+    const trimmedBody = body.trim();
+    const trimmedName = customerName.trim();
+    const trimmedEmail = customerEmail.trim();
+
+    // Friendly pre-validation
+    if (!trimmedTitle) {
+      const msg = 'Please enter a headline or title for your shoe review.';
+      setErrorMessage(msg);
+      showToast?.(msg, 'error');
+      return;
+    }
+    if (trimmedTitle.length < 2) {
+      const msg = 'Review title must be at least 2 characters long.';
+      setErrorMessage(msg);
+      showToast?.(msg, 'error');
+      return;
+    }
+    if (!trimmedBody) {
+      const msg = 'Please share your review details and fit feedback.';
+      setErrorMessage(msg);
+      showToast?.(msg, 'error');
+      return;
+    }
+    if (trimmedBody.length < 5) {
+      const msg = 'Review details must be at least 5 characters long.';
+      setErrorMessage(msg);
+      showToast?.(msg, 'error');
+      return;
+    }
+    if (!trimmedName) {
+      const msg = 'Please enter your reviewer name.';
+      setErrorMessage(msg);
+      showToast?.(msg, 'error');
+      return;
+    }
+    if (!trimmedEmail) {
+      const msg = 'Please provide your email address.';
+      setErrorMessage(msg);
+      showToast?.(msg, 'error');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      const msg = 'Please enter a valid email address (e.g. name@example.com).';
+      setErrorMessage(msg);
+      showToast?.(msg, 'error');
       return;
     }
 
@@ -138,11 +197,11 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
       const finalSku = isCustomProduct ? (customSku.trim() || 'CUSTOM-SKU-1') : (selectedProduct?.sku || 'SHOE-PULSE');
       const finalName = isCustomProduct ? (customName.trim() || 'Custom Footwear') : (selectedProduct?.name || 'Footwear Model');
       const payload = {
-        title: title.trim(),
-        body: body.trim(),
+        title: trimmedTitle,
+        body: trimmedBody,
         rating,
-        customer_name: customerName.trim(),
-        customer_email: customerEmail.trim(),
+        customer_name: trimmedName,
+        customer_email: trimmedEmail,
         sku: finalSku,
         product_name: finalName,
         channel,
@@ -163,14 +222,17 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
         if (onClose) onClose();
       }, 1800);
     } catch (err) {
-      console.error(err);
-      showToast?.(err.message || 'Error submitting review', 'error');
+      console.error('Review submission failed:', err);
+      const friendlyMsg = err.message || 'Unable to submit your review. Please try again.';
+      setErrorMessage(friendlyMsg);
+      showToast?.(friendlyMsg, 'error');
     } finally {
       setSubmitting(false);
     }
   };
 
   const resetForm = () => {
+    setErrorMessage(null);
     setTitle('');
     setBody('');
     setCustomerName('');
@@ -199,6 +261,29 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
           >
             <span className="material-symbols-outlined text-[19px]">close</span>
           </button>
+        )}
+
+        {/* Friendly Error Banner */}
+        {errorMessage && (
+          <div className="mb-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-950 animate-in zoom-in-95 duration-200 flex items-start justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                <span className="material-symbols-outlined text-[18px]">error</span>
+              </div>
+              <div className="text-xs sm:text-sm">
+                <strong className="text-rose-900 font-bold block">Could Not Submit Review</strong>
+                <span className="text-rose-700 font-medium">{errorMessage}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setErrorMessage(null)}
+              className="text-rose-400 hover:text-rose-700 p-1 rounded-lg transition-colors cursor-pointer"
+              title="Dismiss notice"
+            >
+              <span className="material-symbols-outlined text-[16px]">close</span>
+            </button>
+          </div>
         )}
 
         {/* Success Banner if submitted */}
@@ -234,15 +319,7 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={loadSamplePhotos}
-            className="self-start sm:self-auto px-3.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-[#5122fe] text-xs font-bold border border-purple-200 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-98"
-            title="Populate test data instantly"
-          >
-            <span className="material-symbols-outlined text-[15px] text-[#5122fe]">auto_fix_high</span>
-            <span>⚡ Load Sample Data</span>
-          </button>
+
         </div>
 
         {/* 2-Column Wide Form (Generously sized for bigger screens, completely non-scrollable) */}
@@ -494,11 +571,11 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-purple-900/70 font-bold whitespace-nowrap">Channel:</span>
                   <select
-                    value={channel}
+                    value={channel || (channelsList[0] || FALLBACK_CHANNELS[0])}
                     onChange={(e) => setChannel(e.target.value)}
-                    className="h-8 px-2.5 rounded-xl bg-white border border-purple-200 text-xs text-purple-950 focus:outline-none focus:border-[#5122fe] font-semibold cursor-pointer"
+                    className="h-8 px-2.5 rounded-xl bg-white border border-purple-200 text-xs text-purple-950 focus:outline-none focus:border-[#5122fe] font-semibold cursor-pointer min-w-[125px] shadow-2xs"
                   >
-                    {channelsList.map((ch) => (
+                    {(channelsList.length > 0 ? channelsList : FALLBACK_CHANNELS).map((ch) => (
                       <option key={ch} value={ch}>{ch}</option>
                     ))}
                   </select>

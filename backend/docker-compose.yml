@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  backend:
+    build: .
+    container_name: feedback_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DATABASE_NAME=feedback_db
+      - PROJECT_NAME=PulseReview Enterprise Moderation System
+      - PORT=8000
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  mongodb:
+    image: mongo:7.0
+    container_name: feedback_mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo_data:
+  mongo_config:

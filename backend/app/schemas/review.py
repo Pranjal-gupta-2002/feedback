@@ -26,6 +26,8 @@ class ReviewUpdate(BaseModel):
     rating: Optional[int] = Field(None, ge=1, le=5)
     tags: Optional[str] = None
     status: Optional[str] = None
+    customer_name: Optional[str] = None
+    moderation_note: Optional[str] = None
 
 class ReviewResponse(ReviewBase):
     id: str

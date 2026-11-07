@@ -1,0 +1,85 @@
+name: Deploy Backend to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-be.yml'
+  workflow_dispatch:
+
+env:
+  GCP_REGION: asia-south1
+  SERVICE_NAME: feedback-backend
+  IMAGE_NAME: feedback-backend
+
+jobs:
+  deploy-backend:
+    name: Build, Push & Deploy BE
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 1. Log in to Docker Hub
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 2. Authenticate with Google Cloud using Service Account JSON Key
+      - name: Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      # 3. Set up Google Cloud SDK
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      # 4. Build and Push Backend Docker image
+      - name: Build and Push Backend to Docker Hub
+        run: |
+          IMAGE_TAG="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          LATEST_TAG="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest"
+
+          docker build -t $IMAGE_TAG -t $LATEST_TAG ./backend
+          docker push $IMAGE_TAG
+          docker push $LATEST_TAG
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+      # 5. Deploy to Google Cloud Run with GitHub Secrets
+      - name: Deploy Backend to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image ${{ env.IMAGE_TAG }} \
+            --region ${{ env.GCP_REGION }} \
+            --port 8080 \
+            --memory 1Gi \
+            --cpu 1 \
+            --timeout 300 \
+            --platform managed \
+            --allow-unauthenticated \
+            --min-instances 0 \
+            --max-instances 10 \
+            --cpu-boost \
+            --set-env-vars "^##^PROJECT_NAME=PulseReview Enterprise Moderation System##DATABASE_NAME=feedback_db##API_V1_STR=/api##MONGODB_URL=${{ secrets.MONGODB_URL || secrets.MONGODB_URI }}##MONGODB_URI=${{ secrets.MONGODB_URL || secrets.MONGODB_URI }}"
+
+      - name: Print Backend Service URL
+        run: |
+          URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} --region ${{ env.GCP_REGION }} --format 'value(status.url)')
+          echo "=========================================="
+          echo "Backend successfully deployed to: ${URL}"
+          echo "=========================================="
+
+      - name: Fetch Cloud Run Diagnostic Logs
+        if: failure()
+        run: |
+          echo "=== Cloud Run Diagnostic Logs for ${{ env.SERVICE_NAME }} ==="
+          gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=${{ env.SERVICE_NAME }}" \
+            --limit 100 \
+            --format="value(timestamp,severity,textPayload,jsonPayload.message)" || true

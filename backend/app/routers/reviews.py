@@ -4,7 +4,7 @@ from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query, status
 from bson import ObjectId
 from ..database import reviews_col, moderation_rules_col, products_col, tags_col, channels_col, serialize_doc
-from ..schemas.review import ReviewCreate, ReviewResponse, VoteAction, ProductSchema
+from ..schemas.review import ReviewCreate, ReviewUpdate, ReviewResponse, VoteAction, ProductSchema
 from ..services.ai_trust import analyze_review_trust
 
 router = APIRouter(prefix="/reviews", tags=["Reviews"])
@@ -185,4 +185,57 @@ def vote_review(review_id: str, vote: VoteAction):
     if not updated:
         raise HTTPException(status_code=404, detail="Review not found")
         
+    return serialize_doc(updated)
+
+@router.put("/{review_id}", response_model=ReviewResponse)
+def update_review(review_id: str, review_in: ReviewUpdate):
+    query = get_object_id_query(review_id)
+    doc = reviews_col.find_one(query)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    update_fields = {}
+    if review_in.title is not None:
+        update_fields["title"] = review_in.title.strip()
+    if review_in.body is not None:
+        update_fields["body"] = review_in.body.strip()
+    if review_in.rating is not None:
+        update_fields["rating"] = review_in.rating
+    if review_in.tags is not None:
+        update_fields["tags"] = review_in.tags
+    if review_in.status is not None:
+        update_fields["status"] = review_in.status.lower()
+    if review_in.customer_name is not None:
+        update_fields["customer_name"] = review_in.customer_name.strip()
+    if review_in.moderation_note is not None:
+        update_fields["moderation_note"] = review_in.moderation_note.strip()
+
+    now = datetime.datetime.utcnow()
+    update_fields["updated_at"] = now
+    update_fields["moderated_at"] = now
+    update_fields["moderated_by"] = "Admin Moderator"
+
+    # Re-evaluate AI sentiment and trust telemetry with the updated review content
+    active_rule = moderation_rules_col.find_one({"is_active": True})
+    new_title = update_fields.get("title", doc.get("title", ""))
+    new_body = update_fields.get("body", doc.get("body", ""))
+    new_rating = update_fields.get("rating", doc.get("rating", 5))
+
+    sentiment_label, sentiment_score, toxicity_score, spam_score, _ = analyze_review_trust(
+        title=new_title,
+        body=new_body,
+        rating=new_rating,
+        verified=doc.get("verified_purchase", True),
+        rule=active_rule
+    )
+    update_fields["sentiment_label"] = sentiment_label
+    update_fields["sentiment_score"] = sentiment_score
+    update_fields["toxicity_score"] = toxicity_score
+    update_fields["spam_score"] = spam_score
+
+    updated = reviews_col.find_one_and_update(
+        query,
+        {"$set": update_fields},
+        return_document=True
+    )
     return serialize_doc(updated)

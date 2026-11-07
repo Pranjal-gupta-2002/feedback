@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useStaffAuth } from '../context/StaffAuthContext';
 
 export default function StaffGateScreen({ targetPath, showToast }) {
-  const { authenticate, STAFF_PASSCODE } = useStaffAuth();
+  const { authenticate } = useStaffAuth();
   const [passcode, setPasscode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -27,10 +27,6 @@ export default function StaffGateScreen({ targetPath, showToast }) {
     }
   };
 
-  const handleQuickFill = () => {
-    setPasscode(STAFF_PASSCODE);
-    setError('');
-  };
 
   const pageName = targetPath?.includes('moderation') ? 'Moderation Queue' : 'Executive Analytics';
 
@@ -71,7 +67,7 @@ export default function StaffGateScreen({ targetPath, showToast }) {
                   setPasscode(e.target.value);
                   if (error) setError('');
                 }}
-                placeholder="Enter password (12345)..."
+                placeholder="Enter staff password..."
                 className={`w-full h-11 pl-4 pr-11 rounded-2xl bg-purple-50/60 border text-sm text-purple-950 focus:outline-none focus:bg-white transition-all font-mono tracking-wider ${
                   error 
                     ? 'border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-200' 
@@ -98,20 +94,6 @@ export default function StaffGateScreen({ targetPath, showToast }) {
             )}
           </div>
 
-          {/* Quick Fill Helper */}
-          <div className="bg-purple-50/80 p-3 rounded-2xl border border-purple-200/70 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-1.5 text-purple-900/70">
-              <span className="material-symbols-outlined text-[16px] text-[#5122fe]">key</span>
-              <span>Passcode: <strong className="text-purple-950 font-mono">12345</strong></span>
-            </div>
-            <button
-              type="button"
-              onClick={handleQuickFill}
-              className="text-[11px] font-bold text-[#5122fe] hover:underline cursor-pointer bg-white px-2 py-0.5 rounded-lg border border-purple-200 shadow-2xs"
-            >
-              Fill 12345
-            </button>
-          </div>
 
           {/* Action Buttons */}
           <div className="flex flex-col gap-2 pt-2">

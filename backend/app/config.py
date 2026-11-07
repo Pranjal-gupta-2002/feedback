@@ -9,7 +9,7 @@ load_dotenv(dotenv_path=env_path)
 class Settings:
     PROJECT_NAME: str = os.getenv("PROJECT_NAME", "PulseReview Enterprise Moderation System")
     API_V1_STR: str = os.getenv("API_V1_STR", "/api")
-    MONGODB_URL: str = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+    MONGODB_URL: str = os.getenv("MONGODB_URL") or os.getenv("MONGODB_URI") or "mongodb://localhost:27017"
     DATABASE_NAME: str = os.getenv("DATABASE_NAME", "feedback_db")
     PORT: int = int(os.getenv("PORT", 8000))
     CORS_ORIGINS: list = [
