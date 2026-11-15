@@ -4,7 +4,6 @@ import Navbar from './components/Navbar';
 import CustomerReviewsHub from './pages/CustomerReviewsHub';
 import AdminModerationQueue from './pages/AdminModerationQueue';
 import AnalyticsInsights from './pages/AnalyticsInsights';
-import AutoApprovalModal from './components/AutoApprovalModal';
 import StaffPasswordModal from './components/StaffPasswordModal';
 import StaffGateScreen from './components/StaffGateScreen';
 import Toast from './components/Toast';
@@ -25,7 +24,6 @@ function MainAppLayout() {
   const [pendingCount, setPendingCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState(null);
-  const [configModalOpen, setConfigModalOpen] = useState(false);
 
   const showToast = (message, type = 'info') => {
     setToast({ message, type });
@@ -46,7 +44,7 @@ function MainAppLayout() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#fcfaff] text-[#1a0f30] flex flex-col selection:bg-[#5122fe] selection:text-white font-sans">
+    <div className="min-h-screen bg-[#fcfaff] text-[#1a0f30] flex flex-col selection:bg-[#5122fe] selection:text-white font-sans overflow-x-hidden w-full max-w-[100vw]">
       
       {/* Floating Island Navigation */}
       <Navbar
@@ -56,7 +54,7 @@ function MainAppLayout() {
       />
 
       {/* Main Content Area with Routing */}
-      <main className="flex-1 pt-24 sm:pt-28 pb-12 w-full">
+      <main className="flex-1 pt-24 sm:pt-28 pb-12 w-full overflow-x-hidden">
         <Routes>
           {/* Public Route: Feed */}
           <Route 
@@ -97,10 +95,7 @@ function MainAppLayout() {
             path="/analytics" 
             element={
               <ProtectedStaffRoute targetPath="/analytics" showToast={showToast}>
-                <AnalyticsInsights
-                  showToast={showToast}
-                  onOpenConfigRules={() => setConfigModalOpen(true)}
-                />
+                <AnalyticsInsights showToast={showToast} />
               </ProtectedStaffRoute>
             } 
           />
@@ -112,13 +107,6 @@ function MainAppLayout() {
 
       {/* Global Staff Passcode Prompt Modal */}
       <StaffPasswordModal showToast={showToast} />
-
-      {/* Auto-Approval Configuration Dialog */}
-      <AutoApprovalModal
-        isOpen={configModalOpen}
-        onClose={() => setConfigModalOpen(false)}
-        showToast={showToast}
-      />
 
       {/* Notification Toast */}
       <Toast toast={toast} onClose={() => setToast(null)} />

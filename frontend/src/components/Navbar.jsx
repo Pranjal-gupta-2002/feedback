@@ -93,9 +93,9 @@ export default function Navbar({ onSearch, searchQuery }) {
           {/* User Avatar */}
           <div 
             className="w-8 h-8 rounded-full bg-gradient-to-br from-[#5122fe] to-[#8c52ff] text-white text-[11px] font-bold flex items-center justify-center shadow-xs border border-purple-300/40 select-none cursor-pointer"
-            title={isAuthenticated ? 'Eleanor Vance (Staff Moderator)' : 'Shopper Profile'}
+            title={isAuthenticated ? 'Staff Moderator' : 'Shopper Profile'}
           >
-            {isAuthenticated ? 'EV' : 'USR'}
+            {isAuthenticated ? 'SM' : 'USR'}
           </div>
 
         </div>

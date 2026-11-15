@@ -1,14 +1,102 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { api } from '../api/client';
 import SubmitReview from './SubmitReview';
+
+const DEFAULT_CHANNELS = [
+  'Direct Web',
+  'Nike SNKRS App',
+  'Shopify Store',
+  'Amazon Global',
+  'In-App iOS'
+];
+
+/**
+ * Custom Dropdown matching the app's purple glassmorphic theme.
+ * Replaces the Windows native OS blue select dropdown with a sleek, rounded UI.
+ */
+function CustomDropdown({ value, onChange, options, icon = null, className = '' }) {
+  const [open, setOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedOption = options.find((opt) => opt.value === value);
+  const displayLabel = selectedOption ? selectedOption.label : (options[0]?.label || 'Select...');
+
+  return (
+    <div className={`relative inline-block text-left ${className}`} ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={`h-8.5 sm:h-9 px-2.5 sm:px-3 rounded-xl border text-[11px] sm:text-xs font-semibold flex items-center justify-between sm:justify-start gap-1 sm:gap-1.5 transition-all cursor-pointer shadow-2xs select-none w-full ${
+          open
+            ? 'bg-purple-100/90 border-purple-400 text-purple-950 ring-2 ring-purple-400/25'
+            : value
+            ? 'bg-purple-100/70 border-purple-300 text-purple-950 hover:bg-purple-100'
+            : 'bg-purple-50/70 hover:bg-purple-100/80 border-purple-200 text-purple-900/80 hover:text-purple-950'
+        }`}
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          {icon && <span className="material-symbols-outlined text-[14px] sm:text-[15px] text-purple-600 shrink-0">{icon}</span>}
+          <span className="truncate max-w-[100px] sm:max-w-[170px]">{displayLabel}</span>
+        </div>
+        <span className={`material-symbols-outlined text-[15px] sm:text-[16px] text-purple-600 transition-transform duration-200 shrink-0 ${open ? 'rotate-180' : ''}`}>
+          expand_more
+        </span>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 z-50 mt-1.5 min-w-[190px] max-w-[280px] p-1.5 bg-white rounded-2xl border border-purple-200 shadow-xl shadow-purple-500/10 backdrop-blur-md">
+          <div className="max-h-60 overflow-y-auto scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden space-y-0.5">
+            {options.map((opt) => {
+              const isSelected = opt.value === value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                  className={`w-full px-3 py-2 rounded-xl text-left text-xs font-medium flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'bg-purple-100 text-purple-950 font-bold'
+                      : 'text-purple-900/80 hover:bg-purple-50 hover:text-purple-950'
+                  }`}
+                >
+                  <span className="truncate">{opt.label}</span>
+                  {isSelected && (
+                    <span className="material-symbols-outlined text-[15px] text-purple-700 font-bold">
+                      check
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQuery = '' }) {
   const [reviews, setReviews] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedRating, setSelectedRating] = useState(null);
-  const [channels, setChannels] = useState([]);
+  const [channels, setChannels] = useState(DEFAULT_CHANNELS);
   const [selectedChannel, setSelectedChannel] = useState('');
+  const [products, setProducts] = useState([]);
+  const [selectedSku, setSelectedSku] = useState('');
   const [sortBy, setSortBy] = useState('recent');
   const [photosOnly, setPhotosOnly] = useState(false);
   const [localSearch, setLocalSearch] = useState('');
@@ -17,21 +105,63 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
 
   const effectiveSearch = searchQuery || localSearch;
 
-  // 1. Fetch static metadata (channels catalog) once on mount
+  // 1. Fetch static metadata (channels & products catalog) once on mount
   useEffect(() => {
     let isMounted = true;
     api.getMetadata()
       .then((meta) => {
-        if (isMounted && meta?.channels) setChannels(meta.channels);
+        if (!isMounted) return;
+        if (meta?.channels && meta.channels.length > 0) {
+          setChannels(meta.channels);
+        }
+        if (meta?.products && meta.products.length > 0) {
+          setProducts(meta.products);
+        }
       })
-      .catch((err) => console.error('Failed to load channels metadata:', err));
+      .catch((err) => console.error('Failed to load metadata:', err));
     return () => { isMounted = false; };
   }, []);
 
-  // 2. Fetch aggregate review summary (only changes when channel filter changes)
-  const loadSummary = async (ch = selectedChannel) => {
+  // Compute distinct channels from metadata + loaded reviews
+  const distinctChannels = useMemo(() => {
+    const set = new Set([...channels, ...DEFAULT_CHANNELS]);
+    reviews.forEach((r) => { if (r.channel) set.add(r.channel); });
+    return Array.from(set).filter(Boolean);
+  }, [channels, reviews]);
+
+  // Compute distinct shoes/products from catalog + loaded reviews
+  const distinctProducts = useMemo(() => {
+    const map = new Map();
+    products.forEach((p) => {
+      if (p.sku) map.set(p.sku, { sku: p.sku, name: p.name || p.sku });
+    });
+    reviews.forEach((r) => {
+      if (r.sku && !map.has(r.sku)) {
+        map.set(r.sku, { sku: r.sku, name: r.product_name || r.sku });
+      }
+    });
+    return Array.from(map.values());
+  }, [products, reviews]);
+
+  // Helper to format shoe/product labels nicely (e.g. "Nike • Snaker" instead of "snaker (nike)")
+  const formatProductLabel = (p) => {
+    if (!p) return '';
+    const cap = (s) => s ? s.split(/[\s_-]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') : '';
+    const brand = cap(p.sku);
+    const model = cap(p.name);
+    if (brand && model && brand.toLowerCase() !== model.toLowerCase()) {
+      return `${brand} • ${model}`;
+    }
+    return model || brand || 'Unknown Shoe';
+  };
+
+  // 2. Fetch aggregate review summary (filters by channel and shoe/sku)
+  const loadSummary = async (ch = selectedChannel, sku = selectedSku) => {
     try {
-      const sum = await api.getReviewsSummary({ channel: ch || undefined });
+      const sum = await api.getReviewsSummary({
+        channel: ch || undefined,
+        sku: sku || undefined
+      });
       setSummary(sum);
     } catch (err) {
       console.error('Failed to load review summary:', err);
@@ -39,10 +169,10 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
   };
 
   useEffect(() => {
-    loadSummary(selectedChannel);
-  }, [selectedChannel]);
+    loadSummary(selectedChannel, selectedSku);
+  }, [selectedChannel, selectedSku]);
 
-  // 3. Fetch reviews list whenever rating, channel, sort, or search changes
+  // 3. Fetch reviews list whenever rating, channel, shoe/sku, sort, or search changes
   const loadReviews = async () => {
     try {
       setLoading(true);
@@ -50,6 +180,7 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
         status: 'approved',
         rating: selectedRating || undefined,
         channel: selectedChannel || undefined,
+        sku: selectedSku || undefined,
         sort: sortBy,
         search: effectiveSearch || undefined
       });
@@ -64,7 +195,7 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
 
   useEffect(() => {
     loadReviews();
-  }, [selectedRating, selectedChannel, sortBy, effectiveSearch]);
+  }, [selectedRating, selectedChannel, selectedSku, sortBy, effectiveSearch]);
 
   // 4. Full refresh triggered by the manual Refresh button or review submission
   const handleFullRefresh = async () => {
@@ -75,17 +206,20 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
           status: 'approved',
           rating: selectedRating || undefined,
           channel: selectedChannel || undefined,
+          sku: selectedSku || undefined,
           sort: sortBy,
           search: effectiveSearch || undefined
         }),
         api.getReviewsSummary({
-          channel: selectedChannel || undefined
+          channel: selectedChannel || undefined,
+          sku: selectedSku || undefined
         }),
         api.getMetadata()
       ]);
       setReviews(revs);
       setSummary(sum);
-      if (meta?.channels) setChannels(meta.channels);
+      if (meta?.channels && meta.channels.length > 0) setChannels(meta.channels);
+      if (meta?.products && meta.products.length > 0) setProducts(meta.products);
       showToast?.('Reviews refreshed', 'success');
     } catch (err) {
       console.error(err);
@@ -282,81 +416,157 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
         </div>
       </div>
 
-      {/* Filter Toolbar with Photos-Only Toggle */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-white p-3 rounded-2xl border border-purple-200/80 shadow-2xs">
+      {/* Filter & Control Toolbar */}
+      <div className="bg-white p-3 sm:p-4 rounded-2xl border border-purple-200/80 shadow-2xs space-y-2.5 sm:space-y-3">
+        {/* Row 1: Dropdown Selectors & Actions (2x2 grid on mobile, inline flex on desktop) */}
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center sm:justify-between gap-2">
+          {/* Shoe / Product Filter */}
+          <CustomDropdown
+            value={selectedSku}
+            onChange={setSelectedSku}
+            options={[
+              { value: '', label: 'All Shoes & Models' },
+              ...distinctProducts.map((p) => ({
+                value: p.sku,
+                label: formatProductLabel(p)
+              }))
+            ]}
+            icon="steps"
+            className="w-full sm:w-auto"
+          />
 
-        {/* Rating Pills & Photo Toggle */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+          {/* Channel Selector */}
+          <CustomDropdown
+            value={selectedChannel}
+            onChange={setSelectedChannel}
+            options={[
+              { value: '', label: 'All Channels' },
+              ...distinctChannels.map((ch) => ({
+                value: ch,
+                label: ch
+              }))
+            ]}
+            icon="storefront"
+            className="w-full sm:w-auto"
+          />
+
+          {/* Sort Selector */}
+          <CustomDropdown
+            value={sortBy}
+            onChange={setSortBy}
+            options={[
+              { value: 'recent', label: 'Most Recent' },
+              { value: 'highest_rating', label: 'Highest Rating' },
+              { value: 'lowest_rating', label: 'Lowest Rating' },
+              { value: 'most_helpful', label: 'Most Helpful' }
+            ]}
+            icon="sort"
+            className="w-full sm:w-auto sm:ml-auto"
+          />
+
+          {/* Refresh Button */}
+          <button
+            type="button"
+            onClick={handleFullRefresh}
+            disabled={loading}
+            title="Refresh latest reviews"
+            className="h-8.5 sm:h-9 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-[11px] sm:text-xs font-semibold border border-purple-200 flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 disabled:opacity-50 w-full sm:w-auto shrink-0"
+          >
+            <span className={`material-symbols-outlined text-[15px] text-[#5122fe] ${loading ? 'animate-spin' : ''}`}>
+              refresh
+            </span>
+            <span>Refresh</span>
+          </button>
+        </div>
+
+        {/* Subtle Separator */}
+        <div className="border-t border-purple-100/90" />
+
+        {/* Row 2: Star Rating Filter Pills & Photo Proof Filter (Single Swipeable Strip) */}
+        <div className="flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden py-0.5 w-full">
+          <span className="text-[10px] sm:text-[11px] font-semibold text-purple-900/60 uppercase tracking-wider shrink-0 mr-0.5">
+            Rating:
+          </span>
           <button
             onClick={() => setSelectedRating(null)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors ${selectedRating === null ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white font-semibold shadow-xs' : 'text-purple-900/70 hover:bg-purple-50'
-              }`}
+            className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-all cursor-pointer ${selectedRating === null
+              ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white shadow-xs'
+              : 'text-purple-900/70 hover:bg-purple-50 bg-purple-50/40 border border-purple-200/50'
+            }`}
           >
-            All Ratings
+            All
           </button>
           {[5, 4, 3, 2, 1].map((s) => (
             <button
               key={s}
               onClick={() => setSelectedRating(selectedRating === s ? null : s)}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1 ${selectedRating === s ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white font-semibold shadow-xs' : 'text-purple-900/70 hover:bg-purple-50'
-                }`}
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-all flex items-center gap-0.5 sm:gap-1 cursor-pointer ${selectedRating === s
+                ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white shadow-xs'
+                : 'text-purple-900/70 hover:bg-purple-50 bg-purple-50/40 border border-purple-200/50'
+              }`}
             >
               <span>{s}</span>
-              <span className="material-symbols-outlined text-[12px] material-symbols-filled text-amber-400">star</span>
+              <span className="material-symbols-outlined text-[12px] sm:text-[13px] material-symbols-filled text-amber-400">star</span>
             </button>
           ))}
 
-          {/* Toggle Photos Only */}
+          <div className="h-4 w-px bg-purple-200/80 shrink-0 mx-1" />
+
+          {/* Toggle Photos Only Button */}
           <button
             onClick={() => setPhotosOnly(!photosOnly)}
-            className={`ml-2 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 border ${photosOnly
-                ? 'bg-purple-700 text-white border-purple-700 shadow-xs'
-                : 'bg-purple-50/80 text-purple-800 border-purple-200 hover:bg-purple-100'
-              }`}
+            className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-all flex items-center gap-1.5 border cursor-pointer ${photosOnly
+              ? 'bg-purple-700 text-white border-purple-700 shadow-xs'
+              : 'bg-purple-50/80 text-purple-800 border-purple-200 hover:bg-purple-100'
+            }`}
           >
             <span className="material-symbols-outlined text-[14px]">photo_camera</span>
             <span>With Photos ({reviews.filter(r => (r.images && r.images.length > 0) || r.image_url).length})</span>
           </button>
         </div>
 
-        {/* Channel & Sort Selectors */}
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedChannel}
-            onChange={(e) => setSelectedChannel(e.target.value)}
-            className="h-8 px-2.5 rounded-xl bg-purple-50/60 border border-purple-200 text-xs text-purple-950 focus:outline-none focus:border-purple-500 font-medium cursor-pointer"
-          >
-            <option value="">All Channels</option>
-            {channels.map((ch) => (
-              <option key={ch} value={ch}>{ch}</option>
-            ))}
-          </select>
-
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="h-8 px-2.5 rounded-xl bg-purple-50/60 border border-purple-200 text-xs text-purple-950 focus:outline-none focus:border-purple-500 font-medium"
-          >
-            <option value="recent">Most Recent</option>
-            <option value="highest_rating">Highest Rating</option>
-            <option value="lowest_rating">Lowest Rating</option>
-            <option value="most_helpful">Most Helpful</option>
-          </select>
-
-          {/* Manual Refresh Button */}
-          <button
-            type="button"
-            onClick={handleFullRefresh}
-            disabled={loading}
-            title="Refresh latest reviews"
-            className="h-8 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-semibold border border-purple-200 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 disabled:opacity-50 shrink-0"
-          >
-            <span className={`material-symbols-outlined text-[15px] text-[#5122fe] ${loading ? 'animate-spin' : ''}`}>
-              refresh
-            </span>
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-        </div>
+        {/* Active Filters Bar */}
+        {(selectedSku || selectedChannel || selectedRating !== null || photosOnly || effectiveSearch) && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-purple-100 text-xs w-full">
+            <span className="text-purple-900/60 text-[11px] font-medium mr-1">Active filters:</span>
+            {selectedSku && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-purple-100 text-purple-900 font-medium text-[11px]">
+                <span>Shoe: {distinctProducts.find(p => p.sku === selectedSku)?.name || selectedSku}</span>
+                <button onClick={() => setSelectedSku('')} className="hover:text-purple-600 font-bold cursor-pointer">×</button>
+              </span>
+            )}
+            {selectedChannel && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-purple-100 text-purple-900 font-medium text-[11px]">
+                <span>Channel: {selectedChannel}</span>
+                <button onClick={() => setSelectedChannel('')} className="hover:text-purple-600 font-bold cursor-pointer">×</button>
+              </span>
+            )}
+            {selectedRating !== null && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-purple-100 text-purple-900 font-medium text-[11px]">
+                <span>Rating: {selectedRating}★</span>
+                <button onClick={() => setSelectedRating(null)} className="hover:text-purple-600 font-bold cursor-pointer">×</button>
+              </span>
+            )}
+            {photosOnly && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-purple-100 text-purple-900 font-medium text-[11px]">
+                <span>With Photos</span>
+                <button onClick={() => setPhotosOnly(false)} className="hover:text-purple-600 font-bold cursor-pointer">×</button>
+              </span>
+            )}
+            {effectiveSearch && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-purple-100 text-purple-900 font-medium text-[11px]">
+                <span>Search: "{effectiveSearch}"</span>
+                <button onClick={() => setLocalSearch('')} className="hover:text-purple-600 font-bold cursor-pointer">×</button>
+              </span>
+            )}
+            <button
+              onClick={() => { setSelectedRating(null); setSelectedChannel(''); setSelectedSku(''); setPhotosOnly(false); setLocalSearch(''); }}
+              className="text-[11px] text-purple-700 hover:text-purple-950 underline ml-1 cursor-pointer font-medium"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Reviews List */}
@@ -374,8 +584,8 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
               Try resetting your filters or search terms.
             </p>
             <button
-              onClick={() => { setSelectedRating(null); setSelectedChannel(''); setPhotosOnly(false); setLocalSearch(''); }}
-              className="mt-3 px-4 py-1.5 rounded-xl bg-purple-700 text-white text-xs font-semibold hover:bg-purple-800"
+              onClick={() => { setSelectedRating(null); setSelectedChannel(''); setSelectedSku(''); setPhotosOnly(false); setLocalSearch(''); }}
+              className="mt-3 px-4 py-1.5 rounded-xl bg-purple-700 text-white text-xs font-semibold hover:bg-purple-800 cursor-pointer"
             >
               Reset Filters
             </button>
@@ -517,22 +727,18 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
                     <span className="text-[11px] text-purple-900/60 font-medium">Helpful wear review?</span>
                     <button
                       onClick={() => handleVote(r.id, 'helpful')}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 text-[11px] font-medium border border-purple-200 transition-colors"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 text-[11px] font-medium border border-purple-200 transition-colors cursor-pointer"
                     >
                       <span className="material-symbols-outlined text-[13px]">thumb_up</span>
                       <span>Yes ({r.helpful_count})</span>
                     </button>
                     <button
                       onClick={() => handleVote(r.id, 'unhelpful')}
-                      className="inline-flex items-center px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-[11px] border border-purple-200 transition-colors"
+                      className="inline-flex items-center px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-[11px] border border-purple-200 transition-colors cursor-pointer"
                     >
                       <span className="material-symbols-outlined text-[13px]">thumb_down</span>
                     </button>
                   </div>
-
-                  <span className="text-[10px] font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200/60">
-                    AI Trust Confidence: {Math.round(r.sentiment_score * 100)}%
-                  </span>
                 </div>
               </div>
             );

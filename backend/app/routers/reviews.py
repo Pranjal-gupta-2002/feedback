@@ -262,3 +262,11 @@ def update_review(review_id: str, review_in: ReviewUpdate):
         return_document=True
     )
     return serialize_doc(updated)
+
+@router.delete("/{review_id}", status_code=status.HTTP_200_OK)
+def delete_review(review_id: str):
+    query = get_object_id_query(review_id)
+    res = reviews_col.delete_one(query)
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return {"message": "Review deleted successfully", "id": review_id}

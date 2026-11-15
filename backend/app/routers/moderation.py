@@ -23,7 +23,7 @@ def get_object_id_query(id_str: str):
 
 @router.get("/queue")
 def get_moderation_queue(
-    tab: str = Query("pending", pattern="^(pending|approved|flagged|escalated|all)$"),
+    tab: str = Query("pending", pattern="^(pending|approved|flagged|escalated|rejected|all)$"),
     search: Optional[str] = Query(None),
     sku: Optional[str] = Query(None),
     min_toxicity: Optional[float] = Query(None)
@@ -33,6 +33,7 @@ def get_moderation_queue(
     approved_count = reviews_col.count_documents({"status": "approved"})
     flagged_count = reviews_col.count_documents({"status": "flagged"})
     escalated_count = reviews_col.count_documents({"status": "escalated"})
+    rejected_count = reviews_col.count_documents({"status": "rejected"})
     total_count = reviews_col.count_documents({})
 
     filter_q = {}
@@ -90,6 +91,7 @@ def get_moderation_queue(
             "approved_count": approved_count,
             "flagged_count": flagged_count,
             "escalated_count": escalated_count,
+            "rejected_count": rejected_count,
             "total_count": total_count,
             "median_sla_minutes": median_sla,
             "auto_clear_rate": auto_clear_rate
@@ -122,11 +124,11 @@ def execute_moderation_action(
     
     update_data = {
         "status": target_status,
-        "moderated_by": action_in.moderator_name or "Eleanor Vance",
+        "moderated_by": action_in.moderator_name or "Staff Moderator",
         "moderated_at": now,
         "updated_at": now
     }
-    if action_in.note:
+    if action_in.note is not None:
         update_data["moderation_note"] = action_in.note
 
     updated = reviews_col.find_one_and_update(
@@ -168,11 +170,11 @@ def execute_bulk_moderation(
 
     update_fields = {
         "status": target_status,
-        "moderated_by": bulk_in.moderator_name or "Eleanor Vance",
+        "moderated_by": bulk_in.moderator_name or "Staff Moderator",
         "moderated_at": now,
         "updated_at": now
     }
-    if bulk_in.note:
+    if bulk_in.note is not None:
         update_fields["moderation_note"] = bulk_in.note
 
     res = reviews_col.update_many(

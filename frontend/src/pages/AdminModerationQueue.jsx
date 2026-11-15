@@ -26,10 +26,39 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
   const loadQueue = async () => {
     try {
       setLoading(true);
-      const res = await api.getModerationQueue({
-        tab: activeTab,
-        search: effectiveSearch || undefined
-      });
+      let res;
+      try {
+        res = await api.getModerationQueue({
+          tab: activeTab,
+          search: effectiveSearch || undefined
+        });
+      } catch (queueErr) {
+        // Fallback for deployed backend where tab=rejected regex might not be deployed yet
+        if (activeTab === 'rejected') {
+          const allRes = await api.getModerationQueue({
+            tab: 'all',
+            search: effectiveSearch || undefined
+          });
+          const allReviews = allRes.reviews || [];
+          const rejectedReviews = allReviews.filter(r => r.status === 'rejected');
+          res = {
+            ...allRes,
+            reviews: rejectedReviews,
+            metrics: {
+              ...allRes.metrics,
+              rejected_count: rejectedReviews.length
+            }
+          };
+        } else {
+          throw queueErr;
+        }
+      }
+
+      if (res && res.metrics && res.metrics.rejected_count === undefined) {
+        const rejectedEstimate = Math.max(0, (res.metrics.total_count || 0) - (res.metrics.pending_count || 0) - (res.metrics.approved_count || 0));
+        res.metrics.rejected_count = rejectedEstimate;
+      }
+
       setData(res);
       setSelectedIds([]);
     } catch (err) {
@@ -46,7 +75,7 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
 
   const handleAction = async (reviewId, action, note = '') => {
     try {
-      await api.executeAction(reviewId, action, note, 'Eleanor Vance');
+      await api.executeAction(reviewId, action, note, 'Staff Moderator');
       showToast?.(`Review ${action}d successfully!`, 'success');
       loadQueue();
       onQueueUpdated?.();
@@ -55,16 +84,42 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
     }
   };
 
+  const handleDelete = async (reviewId) => {
+    if (!window.confirm('Are you sure you want to permanently delete this review?')) return;
+    try {
+      await api.deleteReview(reviewId);
+      showToast?.('Review permanently deleted', 'success');
+      loadQueue();
+      onQueueUpdated?.();
+    } catch (err) {
+      showToast?.(`Error deleting review: ${err.message}`, 'error');
+    }
+  };
+
   const handleBulkAction = async (action) => {
     if (selectedIds.length === 0) return;
     try {
-      await api.executeBulkAction(selectedIds, action, 'Bulk operation by Eleanor Vance');
+      await api.executeBulkAction(selectedIds, action, '');
       showToast?.(`Applied ${action} to ${selectedIds.length} reviews`, 'success');
       setSelectedIds([]);
       loadQueue();
       onQueueUpdated?.();
     } catch (err) {
       showToast?.(`Bulk operation failed: ${err.message}`, 'error');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    if (!window.confirm(`Are you sure you want to permanently delete ${selectedIds.length} selected review(s)?`)) return;
+    try {
+      await Promise.all(selectedIds.map(id => api.deleteReview(id)));
+      showToast?.(`Permanently deleted ${selectedIds.length} reviews`, 'success');
+      setSelectedIds([]);
+      loadQueue();
+      onQueueUpdated?.();
+    } catch (err) {
+      showToast?.(`Bulk delete failed: ${err.message}`, 'error');
     }
   };
 
@@ -86,40 +141,42 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
   const reviews = data.reviews || [];
 
   return (
-    <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 space-y-4">
+    <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 space-y-4 overflow-x-hidden">
       
       {/* Staff Portal Toolbar */}
       <StaffToolbar pendingCount={metrics.pending_count || 0} />
 
       {/* Top Header & Metrics Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-2xl border border-purple-200/80 shadow-[0_4px_24px_rgba(81,34,254,0.06)]">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-purple-200/80 shadow-[0_4px_24px_rgba(81,34,254,0.06)]">
         <div>
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 bg-purple-100/80 px-2.5 py-0.5 rounded-full border border-purple-200">
               Moderation Pipeline
             </span>
-            <span className="text-[11px] text-purple-400">&bull; Shoe Photo Verification Active</span>
+            <span className="text-[11px] text-purple-400">&bull; Verification Active</span>
           </div>
           <h1 className="font-headline text-lg sm:text-xl font-bold text-purple-950 tracking-tight mt-1">
             Shoe Review Moderation Queue
           </h1>
         </div>
 
-        {/* Compact SLA Counter Pills */}
-        <div className="flex items-center gap-2">
-          <div className="px-3 py-1.5 rounded-xl bg-purple-50/70 border border-purple-200 text-left">
-            <div className="text-[9px] font-semibold text-purple-500 uppercase">Median SLA</div>
-            <div className="text-xs font-bold text-purple-950">{metrics.median_sla_minutes !== undefined ? metrics.median_sla_minutes : 0}m</div>
-          </div>
+        {/* Compact SLA Counter Pills & Refresh */}
+        <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2 flex-1 sm:flex-initial">
+            <div className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-purple-50/70 border border-purple-200 text-center sm:text-left">
+              <div className="text-[9px] font-semibold text-purple-500 uppercase">SLA</div>
+              <div className="text-xs font-bold text-purple-950">{metrics.median_sla_minutes !== undefined ? metrics.median_sla_minutes : 0}m</div>
+            </div>
 
-          <div className="px-3 py-1.5 rounded-xl bg-purple-50/70 border border-purple-200 text-left">
-            <div className="text-[9px] font-semibold text-purple-500 uppercase">Auto-Clear</div>
-            <div className="text-xs font-bold text-emerald-700">{metrics.auto_clear_rate !== undefined ? metrics.auto_clear_rate : 0}%</div>
-          </div>
+            <div className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-purple-50/70 border border-purple-200 text-center sm:text-left">
+              <div className="text-[9px] font-semibold text-purple-500 uppercase">Yield</div>
+              <div className="text-xs font-bold text-emerald-700">{metrics.auto_clear_rate !== undefined ? metrics.auto_clear_rate : 0}%</div>
+            </div>
 
-          <div className="px-3 py-1.5 rounded-xl bg-purple-100/80 border border-purple-300 text-left">
-            <div className="text-[9px] font-semibold text-purple-800 uppercase">Pending Triage</div>
-            <div className="text-xs font-bold text-purple-900">{metrics.pending_count || 0}</div>
+            <div className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-purple-100/80 border border-purple-300 text-center sm:text-left">
+              <div className="text-[9px] font-semibold text-purple-800 uppercase">Pending</div>
+              <div className="text-xs font-bold text-purple-900">{metrics.pending_count || 0}</div>
+            </div>
           </div>
 
           {/* Refresh Button */}
@@ -131,7 +188,7 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
             }}
             disabled={loading}
             title="Refresh moderation queue and metrics"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-bold border border-purple-200 shadow-2xs transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-bold border border-purple-200 shadow-2xs transition-all cursor-pointer active:scale-95 disabled:opacity-50 shrink-0"
           >
             <span className={`material-symbols-outlined text-[16px] text-[#5122fe] ${loading ? 'animate-spin' : ''}`}>
               refresh
@@ -144,11 +201,11 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
       {/* Tabs & Multi-Select Operations */}
       <div className="bg-white rounded-2xl p-2.5 shadow-2xs border border-purple-200/80 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
         
-        {/* Triage Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
+        {/* Triage Tabs - Horizontal scrollbar completely hidden */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 md:pb-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden w-full md:w-auto">
           <button
             onClick={() => setActiveTab('pending')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 shrink-0 ${
               activeTab === 'pending'
                 ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white font-semibold shadow-xs'
                 : 'text-purple-900/70 hover:bg-purple-50'
@@ -164,53 +221,43 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
 
           <button
             onClick={() => setActiveTab('approved')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 shrink-0 ${
               activeTab === 'approved'
                 ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white font-semibold shadow-xs'
                 : 'text-purple-900/70 hover:bg-purple-50'
             }`}
           >
             <span>Approved</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[9px]">
+            <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
+              activeTab === 'approved' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-800'
+            }`}>
               {metrics.approved_count || 0}
             </span>
           </button>
 
           <button
-            onClick={() => setActiveTab('flagged')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-              activeTab === 'flagged'
-                ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white font-semibold shadow-xs'
+            onClick={() => setActiveTab('rejected')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 shrink-0 ${
+              activeTab === 'rejected'
+                ? 'bg-gradient-to-r from-rose-600 to-red-600 text-white font-semibold shadow-xs'
                 : 'text-purple-900/70 hover:bg-purple-50'
             }`}
           >
-            <span>Flagged</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[9px] font-bold">
-              {metrics.flagged_count || 0}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('escalated')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-              activeTab === 'escalated'
-                ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white font-semibold shadow-xs'
-                : 'text-purple-900/70 hover:bg-purple-50'
-            }`}
-          >
-            <span>Escalated</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-purple-50 text-purple-700 text-[9px] font-bold">
-              {metrics.escalated_count || 0}
+            <span>Rejected</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
+              activeTab === 'rejected' ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-700 border border-rose-200'
+            }`}>
+              {metrics.rejected_count ?? 0}
             </span>
           </button>
         </div>
 
         {/* Batch Operations Bar */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between sm:justify-end gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-purple-100 w-full md:w-auto">
           {reviews.length > 0 && (
             <button
               onClick={toggleSelectAll}
-              className="text-xs text-purple-700 hover:text-purple-950 font-medium px-2.5 py-1 rounded-lg hover:bg-purple-50 transition-colors"
+              className="text-xs text-purple-700 hover:text-purple-950 font-medium px-2.5 py-1 rounded-lg hover:bg-purple-50 transition-colors cursor-pointer"
             >
               {selectedIds.length === reviews.length ? 'Deselect All' : 'Select All'}
             </button>
@@ -223,21 +270,21 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
               </span>
               <button
                 onClick={() => handleBulkAction('approve')}
-                className="px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs"
+                className="px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
               >
                 Approve
               </button>
               <button
                 onClick={() => handleBulkAction('reject')}
-                className="px-2.5 py-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-xs"
+                className="px-2.5 py-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
               >
                 Reject
               </button>
               <button
-                onClick={() => handleBulkAction('flag')}
-                className="px-2.5 py-1 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold shadow-xs"
+                onClick={handleBulkDelete}
+                className="px-2.5 py-1 rounded-xl bg-red-700 hover:bg-red-800 text-white text-xs font-semibold shadow-xs cursor-pointer"
               >
-                Flag
+                Delete
               </button>
             </div>
           )}
@@ -272,7 +319,8 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
             });
 
             const statusBadge = 
-              r.status === 'flagged' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+              r.status === 'rejected' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+              r.status === 'flagged' ? 'bg-amber-50 text-amber-700 border-amber-200' :
               r.status === 'pending' ? 'bg-purple-100 text-purple-800 border-purple-200' :
               r.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-purple-50 text-purple-700 border-purple-200';
 
@@ -373,7 +421,7 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
                       )}
 
                       {/* Notes / Risk callouts */}
-                      {r.moderation_note && (
+                      {r.moderation_note && !r.moderation_note.toLowerCase().includes('eleanor vance') && !r.moderation_note.toLowerCase().includes('bulk operation') && (
                         <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-1.5">
                           <span className="material-symbols-outlined text-[16px] text-rose-600">info</span>
                           <div>
@@ -384,77 +432,54 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
                     </div>
                   </div>
 
-                  {/* Right Column: Telemetry & Actions */}
-                  <div className="lg:w-64 flex flex-col gap-2.5 pt-3 lg:pt-0 lg:pl-4 border-t lg:border-t-0 lg:border-l border-purple-100">
-                    
-                    {/* Telemetry Indicator */}
-                    <div className="bg-purple-50/70 p-3 rounded-xl border border-purple-200/80 space-y-1.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-purple-900/60 font-medium">Toxicity Risk</span>
-                        <span className={`font-bold ${toxicityPct > 50 ? 'text-rose-600' : 'text-emerald-700'}`}>
-                          {toxicityPct}%
-                        </span>
-                      </div>
-                      <div className="h-1.5 rounded-full bg-purple-200/70 overflow-hidden">
-                        <div
-                          className={`h-full ${toxicityPct > 50 ? 'bg-rose-500' : 'bg-emerald-500'}`}
-                          style={{ width: `${toxicityPct}%` }}
-                        ></div>
-                      </div>
-
-                      <div className="flex items-center justify-between text-[11px] pt-1">
-                        <span className="text-purple-900/60 font-medium">Sentiment</span>
-                        <span className="font-bold text-purple-700">{sentimentPct}% ({r.sentiment_label})</span>
-                      </div>
+                  {/* Right Column: Moderation Actions */}
+                  <div className="lg:w-56 shrink-0 flex flex-col justify-center gap-2 pt-3 lg:pt-0 lg:pl-5 border-t lg:border-t-0 lg:border-l border-purple-100/80">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-purple-900/40 mb-0.5">
+                      Moderator Actions
                     </div>
 
-                    {/* Action Buttons */}
-                    <div className="grid grid-cols-2 gap-1.5">
+                    <div className="grid grid-cols-2 gap-2">
                       <button
+                        type="button"
                         onClick={() => handleAction(r.id, 'approve')}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center justify-center gap-1 shadow-xs transition-colors"
+                        className="h-9 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/20 hover:shadow-md transition-all cursor-pointer active:scale-95"
                       >
-                        <span className="material-symbols-outlined text-[15px]">check</span>
-                        Approve
+                        <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                        <span>Approve</span>
                       </button>
 
                       <button
+                        type="button"
                         onClick={() => {
                           setTargetReviewId(r.id);
                           setRejectModalOpen(true);
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold flex items-center justify-center gap-1 transition-colors"
+                        className="h-9 px-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 hover:border-rose-300 shadow-2xs"
                       >
-                        <span className="material-symbols-outlined text-[15px]">close</span>
-                        Reject
+                        <span className="material-symbols-outlined text-[16px]">cancel</span>
+                        <span>Reject</span>
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-1.5">
+                    <div className="grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => handleAction(r.id, 'flag', 'Manual flag by moderator')}
-                        className="px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 text-[11px] font-medium border border-purple-200 flex items-center justify-center gap-0.5"
+                        type="button"
+                        onClick={() => handleOpenEdit(r)}
+                        className="h-9 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-[#5122fe] border border-purple-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 hover:border-[#5122fe]/40 shadow-2xs"
                       >
-                        <span className="material-symbols-outlined text-[13px]">flag</span>
-                        Flag
+                        <span className="material-symbols-outlined text-[16px]">edit_note</span>
+                        <span>Edit</span>
                       </button>
 
                       <button
-                        onClick={() => handleAction(r.id, 'escalate', 'Escalated to Safety & Compliance')}
-                        className="px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 text-[11px] font-medium border border-purple-200 flex items-center justify-center gap-0.5"
+                        type="button"
+                        onClick={() => handleDelete(r.id)}
+                        className="h-9 px-3 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 hover:border-red-300 shadow-2xs"
                       >
-                        <span className="material-symbols-outlined text-[13px]">shield</span>
-                        Escalate
+                        <span className="material-symbols-outlined text-[16px]">delete</span>
+                        <span>Delete</span>
                       </button>
                     </div>
-
-                    <button
-                      onClick={() => handleOpenEdit(r)}
-                      className="w-full py-1.5 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-[#5122fe] border border-purple-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs hover:border-[#5122fe]/40"
-                    >
-                      <span className="material-symbols-outlined text-[15px]">edit_note</span>
-                      Edit Feedback
-                    </button>
                   </div>
                 </div>
               </div>

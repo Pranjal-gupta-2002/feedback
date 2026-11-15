@@ -50,13 +50,13 @@ class ReviewResponse(ReviewBase):
 class ModerationAction(BaseModel):
     action: str = Field(..., description="'approve', 'reject', 'flag', 'escalate'")
     note: Optional[str] = None
-    moderator_name: Optional[str] = "Eleanor Vance"
+    moderator_name: Optional[str] = "Staff Moderator"
 
 class BulkModerationAction(BaseModel):
     review_ids: List[str]
     action: str = Field(..., description="'approve', 'reject', 'flag', 'escalate'")
     note: Optional[str] = None
-    moderator_name: Optional[str] = "Eleanor Vance"
+    moderator_name: Optional[str] = "Staff Moderator"
 
 class VoteAction(BaseModel):
     vote_type: str = Field(..., description="'helpful' or 'unhelpful'")

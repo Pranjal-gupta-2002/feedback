@@ -138,6 +138,12 @@ export const api = {
     });
   },
 
+  deleteReview: (id) => {
+    return request(`/api/reviews/${id}`, {
+      method: 'DELETE'
+    });
+  },
+
   // Moderation
   getModerationQueue: (params = {}) => {
     const q = new URLSearchParams();
@@ -148,14 +154,14 @@ export const api = {
     return request(`/api/moderation/queue?${q.toString()}`);
   },
 
-  executeAction: (reviewId, action, note = '', moderatorName = 'Eleanor Vance') => {
+  executeAction: (reviewId, action, note = '', moderatorName = 'Staff Moderator') => {
     return request(`/api/moderation/reviews/${reviewId}/action`, {
       method: 'POST',
       body: JSON.stringify({ action, note, moderator_name: moderatorName })
     });
   },
 
-  executeBulkAction: (reviewIds, action, note = '', moderatorName = 'Eleanor Vance') => {
+  executeBulkAction: (reviewIds, action, note = '', moderatorName = 'Staff Moderator') => {
     return request('/api/moderation/bulk-action', {
       method: 'POST',
       body: JSON.stringify({ review_ids: reviewIds, action, note, moderator_name: moderatorName })

@@ -23,18 +23,21 @@ def get_analytics_overview():
     daily_volume = []
     for d in past_7_days:
         day_str = d.strftime("%a")
+        date_str = d.strftime("%b %d")
         day_reviews = [
             r for r in all_reviews 
             if isinstance(r.get("created_at"), datetime.datetime) and r["created_at"].date() == d.date()
         ]
         vol = len(day_reviews)
         appr = sum(1 for r in day_reviews if r.get("status") == "approved")
-        flag = sum(1 for r in day_reviews if r.get("status") in ["flagged", "escalated"])
+        # Moderated encompasses all reviews that required or require moderation (pending, flagged, escalated, rejected)
+        mod = max(0, vol - appr)
         daily_volume.append({
             "day": day_str,
+            "date": date_str,
             "volume": vol,
             "approved": appr,
-            "flagged": flag
+            "flagged": mod
         })
 
     # Hourly intervals (00-04h, 04-08h, 08-12h, 12-16h, 16-20h, 20-24h)
@@ -113,6 +116,7 @@ def get_analytics_overview():
             product_map[sku] = {
                 "sku": sku,
                 "name": r.get("product_name", sku),
+                "brand": r.get("brand", ""),
                 "category": "Footwear",
                 "attribute": "Custom Gear",
                 "icon": "steps"
@@ -129,9 +133,14 @@ def get_analytics_overview():
             p_avg = 0.0
             p_ver = 0
             
+        b_name = p_info.get("brand") or (prod_reviews[0].get("brand", "") if prod_reviews else "")
+        if not b_name and sku:
+            b_name = sku
+
         product_telemetry.append({
             "sku": sku,
             "name": p_info.get("name", sku),
+            "brand": b_name,
             "category": p_info.get("category", "Footwear"),
             "baseRating": p_avg,
             "baseVolume": p_vol,
@@ -194,7 +203,8 @@ def get_analytics_overview():
         "Negative": sum(1 for r in all_reviews if r.get("sentiment_label") == "Negative"),
     }
 
-    channel_breakdown = {}
+    DEFAULT_MONITORED_CHANNELS = ["Direct Web", "Shopify Store", "Amazon Marketplace", "Mobile App"]
+    channel_breakdown = {ch: 0 for ch in DEFAULT_MONITORED_CHANNELS}
     for r in all_reviews:
         ch = r.get("channel") or "Direct Web"
         channel_breakdown[ch] = channel_breakdown.get(ch, 0) + 1

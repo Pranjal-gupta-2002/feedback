@@ -96,3 +96,18 @@ h1, h2, h3, h4, h5, h6, .font-headline {
 ::-webkit-scrollbar-thumb:hover {
   background: #5122fe;
 }
+
+/* Remove default browser focus outline and tap highlights on Recharts SVG surfaces */
+.recharts-wrapper,
+.recharts-surface,
+.recharts-wrapper:focus,
+.recharts-surface:focus,
+.recharts-wrapper *:focus,
+.recharts-surface *:focus,
+svg.recharts-surface,
+svg.recharts-surface:focus,
+svg.recharts-surface:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
