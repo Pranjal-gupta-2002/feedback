@@ -82,7 +82,7 @@ jobs:
             --min-instances 0 \
             --max-instances 10 \
             --cpu-boost \
-            --set-env-vars "^##^PROJECT_NAME=PulseReview Enterprise Moderation System##DATABASE_NAME=feedback_db##API_V1_STR=/api##MONGODB_URL=${{ secrets.MONGODB_URL || secrets.MONGODB_URI }}##MONGODB_URI=${{ secrets.MONGODB_URL || secrets.MONGODB_URI }}"
+            --set-env-vars "^##^PROJECT_NAME=PulseReview Enterprise Moderation System##DATABASE_NAME=feedback_db##API_V1_STR=/api##MONGODB_URL=${{ secrets.MONGODB_URL || secrets.MONGODB_URI }}##MONGODB_URI=${{ secrets.MONGODB_URL || secrets.MONGODB_URI }}##CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}##CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}##CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}"
 
       - name: Print Backend Service URL
         run: |
