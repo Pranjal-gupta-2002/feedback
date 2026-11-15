@@ -94,6 +94,14 @@ class MetadataResponse(BaseModel):
     tags: List[str]
     channels: List[str]
 
+class ReviewSummary(BaseModel):
+    total_reviews: int
+    average_rating: float
+    verified_percentage: float
+    photo_percentage: float
+    recommend_percentage: float = 0.0
+    rating_distribution: Dict[str, Dict[str, Any]]
+
 class AnalyticsOverview(BaseModel):
     total_reviews: int
     average_rating: float

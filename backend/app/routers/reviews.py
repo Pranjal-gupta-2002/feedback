@@ -3,8 +3,8 @@ import re
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query, status
 from bson import ObjectId
-from ..database import reviews_col, moderation_rules_col, serialize_doc
-from ..schemas.review import ReviewCreate, ReviewUpdate, ReviewResponse, VoteAction
+from ..database import reviews_col, moderation_rules_col, products_col, serialize_doc
+from ..schemas.review import ReviewCreate, ReviewUpdate, ReviewResponse, VoteAction, ReviewSummary
 from ..services.ai_trust import analyze_review_trust
 
 router = APIRouter(prefix="/reviews", tags=["Reviews"])
@@ -131,6 +131,57 @@ def submit_review(review_in: ReviewCreate):
         )
         
     return serialize_doc(doc)
+
+@router.get("/summary", response_model=ReviewSummary)
+def get_reviews_summary(
+    sku: Optional[str] = Query(None),
+    channel: Optional[str] = Query(None)
+):
+    query = {"status": "approved"}
+    if sku:
+        query["sku"] = sku
+    if channel:
+        query["channel"] = channel
+        
+    reviews = list(reviews_col.find(query))
+    total = len(reviews)
+    
+    if total == 0:
+        return {
+            "total_reviews": 0,
+            "average_rating": 0.0,
+            "verified_percentage": 0.0,
+            "photo_percentage": 0.0,
+            "recommend_percentage": 0.0,
+            "rating_distribution": {f"{i}_star": {"count": 0, "percentage": 0.0} for i in range(5, 0, -1)}
+        }
+        
+    ratings = [r.get("rating", 5) for r in reviews]
+    avg_rating = round(sum(ratings) / total, 1)
+    
+    verified_count = sum(1 for r in reviews if r.get("verified_purchase"))
+    verified_pct = round((verified_count / total) * 100, 1)
+    
+    photo_count = sum(1 for r in reviews if (r.get("images") and len(r["images"]) > 0) or r.get("image_url"))
+    photo_pct = round((photo_count / total) * 100, 1)
+    
+    recommend_count = sum(1 for r in reviews if r.get("recommend", True) or r.get("rating", 0) >= 4)
+    recommend_pct = round((recommend_count / total) * 100, 1)
+    
+    rating_distribution = {}
+    for star in range(5, 0, -1):
+        c = sum(1 for r in reviews if r.get("rating") == star)
+        pct = round((c / total) * 100, 1)
+        rating_distribution[f"{star}_star"] = {"count": c, "percentage": pct}
+        
+    return {
+        "total_reviews": total,
+        "average_rating": avg_rating,
+        "verified_percentage": verified_pct,
+        "photo_percentage": photo_pct,
+        "recommend_percentage": recommend_pct,
+        "rating_distribution": rating_distribution
+    }
 
 @router.get("/{review_id}", response_model=ReviewResponse)
 def get_review(review_id: str):

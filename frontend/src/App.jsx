@@ -43,8 +43,6 @@ function MainAppLayout() {
 
   useEffect(() => {
     refreshPendingCount();
-    const interval = setInterval(refreshPendingCount, 15000);
-    return () => clearInterval(interval);
   }, []);
 
   return (

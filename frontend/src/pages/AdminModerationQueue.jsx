@@ -121,6 +121,23 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
             <div className="text-[9px] font-semibold text-purple-800 uppercase">Pending Triage</div>
             <div className="text-xs font-bold text-purple-900">{metrics.pending_count || 0}</div>
           </div>
+
+          {/* Refresh Button */}
+          <button
+            type="button"
+            onClick={() => {
+              loadQueue();
+              onQueueUpdated?.();
+            }}
+            disabled={loading}
+            title="Refresh moderation queue and metrics"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-bold border border-purple-200 shadow-2xs transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+          >
+            <span className={`material-symbols-outlined text-[16px] text-[#5122fe] ${loading ? 'animate-spin' : ''}`}>
+              refresh
+            </span>
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
         </div>
       </div>
 

@@ -109,6 +109,14 @@ export const api = {
     return request(`/api/reviews?${q.toString()}`);
   },
 
+  getReviewsSummary: (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.sku) q.append('sku', params.sku);
+    if (params.channel) q.append('channel', params.channel);
+    const qs = q.toString();
+    return request(`/api/reviews/summary${qs ? `?${qs}` : ''}`);
+  },
+
   submitReview: (reviewData) => {
     return request('/api/reviews', {
       method: 'POST',

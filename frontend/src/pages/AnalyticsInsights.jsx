@@ -156,6 +156,20 @@ export default function AnalyticsInsights({ showToast, onOpenConfigRules }) {
             ))}
           </div>
 
+          {/* Refresh Analytics */}
+          <button
+            type="button"
+            onClick={loadData}
+            disabled={loading}
+            title="Refresh analytics telemetry"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-white hover:bg-purple-50 text-purple-900 text-xs font-bold border border-purple-200 shadow-2xs transition-all cursor-pointer active:scale-98 disabled:opacity-50"
+          >
+            <span className={`material-symbols-outlined text-[17px] text-[#5122fe] ${loading ? 'animate-spin' : ''}`}>
+              refresh
+            </span>
+            <span>Refresh</span>
+          </button>
+
           {/* Export CSV */}
           <button
             type="button"

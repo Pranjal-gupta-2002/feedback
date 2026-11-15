@@ -4,7 +4,7 @@ import SubmitReview from './SubmitReview';
 
 export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQuery = '' }) {
   const [reviews, setReviews] = useState([]);
-  const [analytics, setAnalytics] = useState(null);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedRating, setSelectedRating] = useState(null);
   const [channels, setChannels] = useState([]);
@@ -17,23 +17,43 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
 
   const effectiveSearch = searchQuery || localSearch;
 
-  const loadData = async () => {
+  // 1. Fetch static metadata (channels catalog) once on mount
+  useEffect(() => {
+    let isMounted = true;
+    api.getMetadata()
+      .then((meta) => {
+        if (isMounted && meta?.channels) setChannels(meta.channels);
+      })
+      .catch((err) => console.error('Failed to load channels metadata:', err));
+    return () => { isMounted = false; };
+  }, []);
+
+  // 2. Fetch aggregate review summary (only changes when channel filter changes)
+  const loadSummary = async (ch = selectedChannel) => {
+    try {
+      const sum = await api.getReviewsSummary({ channel: ch || undefined });
+      setSummary(sum);
+    } catch (err) {
+      console.error('Failed to load review summary:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadSummary(selectedChannel);
+  }, [selectedChannel]);
+
+  // 3. Fetch reviews list whenever rating, channel, sort, or search changes
+  const loadReviews = async () => {
     try {
       setLoading(true);
-      const [revs, stats, meta] = await Promise.all([
-        api.getReviews({
-          status: 'approved',
-          rating: selectedRating || undefined,
-          channel: selectedChannel || undefined,
-          sort: sortBy,
-          search: effectiveSearch || undefined
-        }),
-        api.getAnalyticsOverview(),
-        api.getMetadata()
-      ]);
+      const revs = await api.getReviews({
+        status: 'approved',
+        rating: selectedRating || undefined,
+        channel: selectedChannel || undefined,
+        sort: sortBy,
+        search: effectiveSearch || undefined
+      });
       setReviews(revs);
-      setAnalytics(stats);
-      if (meta?.channels) setChannels(meta.channels);
     } catch (err) {
       console.error(err);
       showToast?.('Error loading customer reviews', 'error');
@@ -43,8 +63,37 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
   };
 
   useEffect(() => {
-    loadData();
+    loadReviews();
   }, [selectedRating, selectedChannel, sortBy, effectiveSearch]);
+
+  // 4. Full refresh triggered by the manual Refresh button or review submission
+  const handleFullRefresh = async () => {
+    try {
+      setLoading(true);
+      const [revs, sum, meta] = await Promise.all([
+        api.getReviews({
+          status: 'approved',
+          rating: selectedRating || undefined,
+          channel: selectedChannel || undefined,
+          sort: sortBy,
+          search: effectiveSearch || undefined
+        }),
+        api.getReviewsSummary({
+          channel: selectedChannel || undefined
+        }),
+        api.getMetadata()
+      ]);
+      setReviews(revs);
+      setSummary(sum);
+      if (meta?.channels) setChannels(meta.channels);
+      showToast?.('Reviews refreshed', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast?.('Error refreshing reviews', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleVote = async (id, voteType) => {
     try {
@@ -119,18 +168,18 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
 
             <div className="flex items-baseline gap-3">
               <span className="font-headline text-3xl sm:text-4xl font-extrabold text-purple-950 tracking-tight">
-                {analytics && analytics.total_reviews > 0 ? analytics.average_rating.toFixed(1) : '0.0'}
+                {summary && summary.total_reviews > 0 ? summary.average_rating.toFixed(1) : '0.0'}
               </span>
               <div className="flex flex-col">
                 <div className="flex items-center text-amber-400">
                   {[1, 2, 3, 4, 5].map((star) => (
                     <span key={star} className="material-symbols-outlined text-[18px] material-symbols-filled">
-                      {star <= Math.round(analytics?.average_rating || 0) ? 'star' : 'star_border'}
+                      {star <= Math.round(summary?.average_rating || 0) ? 'star' : 'star_border'}
                     </span>
                   ))}
                 </div>
                 <span className="text-[11px] text-purple-900/70 mt-0.5">
-                  Based on {analytics?.total_reviews ?? reviews.length} customer review{(analytics?.total_reviews ?? reviews.length) === 1 ? '' : 's'}
+                  Based on {summary?.total_reviews ?? reviews.length} customer review{(summary?.total_reviews ?? reviews.length) === 1 ? '' : 's'}
                 </span>
               </div>
             </div>
@@ -160,7 +209,7 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
             </div>
             {[5, 4, 3, 2, 1].map((star) => {
               const key = `${star}_star`;
-              const data = analytics?.rating_distribution?.[key] || { count: 0, percentage: 0 };
+              const data = summary?.rating_distribution?.[key] || { count: 0, percentage: 0 };
               const barColor = star >= 4
                 ? 'bg-gradient-to-r from-purple-600 to-violet-500'
                 : star === 3
@@ -200,21 +249,21 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
                   <span className="material-symbols-outlined text-[14px] text-emerald-600 material-symbols-filled">verified</span>
                   Verified Orders
                 </span>
-                <span className="font-bold text-purple-950">{analytics ? analytics.verified_percentage : 0}%</span>
+                <span className="font-bold text-purple-950">{summary ? summary.verified_percentage : 0}%</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-purple-700/80 flex items-center gap-1">
                   <span className="material-symbols-outlined text-[14px] text-purple-600">photo_camera</span>
                   With Photo Proof
                 </span>
-                <span className="font-bold text-purple-950">{analytics ? analytics.photo_percentage : 0}%</span>
+                <span className="font-bold text-purple-950">{summary ? summary.photo_percentage : 0}%</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-purple-700/80 flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[14px] text-purple-600">bolt</span>
-                  Auto-Clear Yield
+                  <span className="material-symbols-outlined text-[14px] text-emerald-600 material-symbols-filled">thumb_up</span>
+                  Recommend Rate
                 </span>
-                <span className="font-bold text-emerald-700">{analytics ? analytics.auto_clear_rate : 0}%</span>
+                <span className="font-bold text-emerald-700">{summary ? (summary.recommend_percentage ?? 0) : 0}%</span>
               </div>
             </div>
           </div>
@@ -224,7 +273,11 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
         <div className="mt-4 pt-3.5 border-t border-purple-100 flex flex-wrap items-center justify-between gap-3 text-[11px] text-purple-900/70">
           <div className="flex items-center gap-1.5">
             <span className="material-symbols-outlined text-[14px] text-emerald-600 material-symbols-filled">verified</span>
-            <span>{analytics ? analytics.verified_percentage : 0}% Verified Buyer Reviews</span>
+            <span>{summary ? summary.verified_percentage : 0}% Verified Buyer Reviews</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[14px] text-purple-600">thumb_up</span>
+            <span>{summary ? (summary.recommend_percentage ?? 0) : 0}% Recommendation Rate</span>
           </div>
         </div>
       </div>
@@ -289,6 +342,20 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
             <option value="lowest_rating">Lowest Rating</option>
             <option value="most_helpful">Most Helpful</option>
           </select>
+
+          {/* Manual Refresh Button */}
+          <button
+            type="button"
+            onClick={handleFullRefresh}
+            disabled={loading}
+            title="Refresh latest reviews"
+            className="h-8 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-semibold border border-purple-200 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 disabled:opacity-50 shrink-0"
+          >
+            <span className={`material-symbols-outlined text-[15px] text-[#5122fe] ${loading ? 'animate-spin' : ''}`}>
+              refresh
+            </span>
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
         </div>
       </div>
 
@@ -556,7 +623,7 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
         isOpen={writeModalOpen}
         onClose={() => setWriteModalOpen(false)}
         onReviewSubmitted={() => {
-          loadData();
+          handleFullRefresh();
           showToast?.('Shoe wear-test review published live!', 'success');
         }}
         showToast={showToast}
