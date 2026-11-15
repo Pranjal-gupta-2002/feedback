@@ -108,6 +108,7 @@ export const api = {
     if (params.channel) q.append('channel', params.channel);
     if (params.sort) q.append('sort', params.sort);
     if (params.limit) q.append('limit', params.limit);
+    if (params.offset !== undefined && params.offset !== null) q.append('offset', params.offset);
     return request(`/api/reviews?${q.toString()}`);
   },
 
@@ -152,7 +153,11 @@ export const api = {
     if (params.tab) q.append('tab', params.tab);
     if (params.search) q.append('search', params.search);
     if (params.sku) q.append('sku', params.sku);
+    if (params.channel) q.append('channel', params.channel);
+    if (params.rating) q.append('rating', params.rating);
     if (params.min_toxicity) q.append('min_toxicity', params.min_toxicity);
+    if (params.limit) q.append('limit', params.limit);
+    if (params.offset !== undefined && params.offset !== null) q.append('offset', params.offset);
     return request(`/api/moderation/queue?${q.toString()}`);
   },
 

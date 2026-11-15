@@ -50,6 +50,7 @@ function MainAppLayout() {
               <CustomerReviewsHub
                 showToast={showToast}
                 searchQuery={searchQuery}
+                onSearch={setSearchQuery}
               />
             } 
           />
@@ -59,6 +60,7 @@ function MainAppLayout() {
               <CustomerReviewsHub
                 showToast={showToast}
                 searchQuery={searchQuery}
+                onSearch={setSearchQuery}
               />
             } 
           />
@@ -71,6 +73,7 @@ function MainAppLayout() {
                 <AdminModerationQueue
                   showToast={showToast}
                   searchQuery={searchQuery}
+                  onSearch={setSearchQuery}
                 />
               </ProtectedStaffRoute>
             } 

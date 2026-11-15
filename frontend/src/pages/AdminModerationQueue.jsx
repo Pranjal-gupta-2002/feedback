@@ -1,14 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { api } from '../api/client';
 import StaffToolbar from '../components/StaffToolbar';
 import EditReviewModal from '../components/EditReviewModal';
+import CustomDropdown from '../components/CustomDropdown';
+import { useDebounce } from '../hooks/useDebounce';
+import { throttle } from '../utils/throttle';
 
-export default function AdminModerationQueue({ showToast, onQueueUpdated, searchQuery = '' }) {
+const QUEUE_PAGE_SIZE = 8;
+
+export default function AdminModerationQueue({ showToast, onQueueUpdated, searchQuery = '', onSearch }) {
   const [activeTab, setActiveTab] = useState('pending');
   const [data, setData] = useState({ metrics: {}, reviews: [] });
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const sentinelRef = useRef(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [localSearch, setLocalSearch] = useState('');
+  const [products, setProducts] = useState([]);
+  const [channels, setChannels] = useState([]);
+  const [selectedSku, setSelectedSku] = useState('');
+  const [selectedChannel, setSelectedChannel] = useState('');
+  const [selectedRating, setSelectedRating] = useState(null);
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [targetReviewId, setTargetReviewId] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -16,12 +29,59 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingReview, setEditingReview] = useState(null);
 
+  const handleClearSearch = () => {
+    setLocalSearch('');
+    onSearch?.('');
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    api.getMetadata()
+      .then((meta) => {
+        if (!isMounted) return;
+        if (meta?.products) setProducts(meta.products);
+        if (meta?.channels) setChannels(meta.channels);
+      })
+      .catch((err) => console.error('Failed to load queue metadata:', err));
+    return () => { isMounted = false; };
+  }, []);
+
+  const distinctProducts = useMemo(() => {
+    const map = new Map();
+    products.forEach((p) => {
+      if (p.sku) map.set(p.sku, { sku: p.sku, name: p.name || p.sku });
+    });
+    (data.reviews || []).forEach((r) => {
+      if (r.sku && !map.has(r.sku)) {
+        map.set(r.sku, { sku: r.sku, name: r.product_name || r.sku });
+      }
+    });
+    return Array.from(map.values());
+  }, [products, data.reviews]);
+
+  const distinctChannels = useMemo(() => {
+    const set = new Set([...channels, 'Direct Web', 'Retail Store', 'Mobile App', 'In-App iOS']);
+    (data.reviews || []).forEach((r) => { if (r.channel) set.add(r.channel); });
+    return Array.from(set).filter(Boolean);
+  }, [channels, data.reviews]);
+
+  const formatProductLabel = (p) => {
+    const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+    const brand = cap(p.sku);
+    const model = cap(p.name);
+    if (brand && model && brand.toLowerCase() !== model.toLowerCase()) {
+      return `${brand} • ${model}`;
+    }
+    return model || brand || 'Unknown Shoe';
+  };
+
   const handleOpenEdit = (review) => {
     setEditingReview(review);
     setEditModalOpen(true);
   };
 
   const effectiveSearch = searchQuery || localSearch;
+  const debouncedSearch = useDebounce(effectiveSearch, 350);
 
   const loadQueue = async () => {
     try {
@@ -30,14 +90,24 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
       try {
         res = await api.getModerationQueue({
           tab: activeTab,
-          search: effectiveSearch || undefined
+          search: debouncedSearch || undefined,
+          sku: selectedSku || undefined,
+          channel: selectedChannel || undefined,
+          rating: selectedRating !== null ? selectedRating : undefined,
+          limit: QUEUE_PAGE_SIZE,
+          offset: 0
         });
       } catch (queueErr) {
         // Fallback for deployed backend where tab=rejected regex might not be deployed yet
         if (activeTab === 'rejected') {
           const allRes = await api.getModerationQueue({
             tab: 'all',
-            search: effectiveSearch || undefined
+            search: debouncedSearch || undefined,
+            sku: selectedSku || undefined,
+            channel: selectedChannel || undefined,
+            rating: selectedRating !== null ? selectedRating : undefined,
+            limit: QUEUE_PAGE_SIZE,
+            offset: 0
           });
           const allReviews = allRes.reviews || [];
           const rejectedReviews = allReviews.filter(r => r.status === 'rejected');
@@ -61,6 +131,8 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
 
       setData(res);
       setSelectedIds([]);
+      const loadedCount = (res?.reviews || []).length;
+      setHasMore(loadedCount >= QUEUE_PAGE_SIZE);
     } catch (err) {
       console.error(err);
       showToast?.('Error loading moderation queue', 'error');
@@ -71,7 +143,110 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
 
   useEffect(() => {
     loadQueue();
-  }, [activeTab, effectiveSearch]);
+  }, [activeTab, debouncedSearch, selectedSku, selectedChannel, selectedRating]);
+
+  // Load next page of moderation queue items (Infinite Scroll)
+  const loadMoreQueue = useCallback(async () => {
+    if (loading || loadingMore || !hasMore) return;
+    try {
+      setLoadingMore(true);
+      const currentOffset = (data.reviews || []).length;
+      let nextBatch = [];
+
+      try {
+        const res = await api.getModerationQueue({
+          tab: activeTab,
+          search: debouncedSearch || undefined,
+          sku: selectedSku || undefined,
+          channel: selectedChannel || undefined,
+          rating: selectedRating !== null ? selectedRating : undefined,
+          limit: QUEUE_PAGE_SIZE,
+          offset: currentOffset
+        });
+        nextBatch = res?.reviews || [];
+      } catch (queueErr) {
+        if (activeTab === 'rejected') {
+          const allRes = await api.getModerationQueue({
+            tab: 'all',
+            search: debouncedSearch || undefined,
+            sku: selectedSku || undefined,
+            channel: selectedChannel || undefined,
+            rating: selectedRating !== null ? selectedRating : undefined,
+            limit: QUEUE_PAGE_SIZE,
+            offset: currentOffset
+          });
+          nextBatch = (allRes?.reviews || []).filter(r => r.status === 'rejected');
+        } else {
+          throw queueErr;
+        }
+      }
+
+      if (!nextBatch || nextBatch.length === 0) {
+        setHasMore(false);
+      } else {
+        setData(prev => {
+          const prevReviews = prev?.reviews || [];
+          const existingIds = new Set(prevReviews.map(r => r.id));
+          const filteredNew = nextBatch.filter(r => !existingIds.has(r.id));
+          return {
+            ...prev,
+            reviews: [...prevReviews, ...filteredNew]
+          };
+        });
+        if (nextBatch.length < QUEUE_PAGE_SIZE) {
+          setHasMore(false);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load more queue items:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loading, loadingMore, hasMore, (data.reviews || []).length, activeTab, debouncedSearch, selectedSku, selectedChannel, selectedRating]);
+
+  // Throttled window scroll listener for infinite scroll
+  useEffect(() => {
+    if (!hasMore || loading || loadingMore) return;
+
+    const handleScroll = throttle(() => {
+      const scrollPosition = window.innerHeight + window.scrollY;
+      const threshold = document.documentElement.scrollHeight - 350;
+
+      if (scrollPosition >= threshold) {
+        loadMoreQueue();
+      }
+    }, 250);
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      handleScroll.cancel();
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, [hasMore, loading, loadingMore, loadMoreQueue]);
+
+  // Throttled IntersectionObserver on sentinel
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !hasMore || loading || loadingMore) return;
+
+    let lastTriggerTime = 0;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (first.isIntersecting) {
+          const now = Date.now();
+          if (now - lastTriggerTime > 300) {
+            lastTriggerTime = now;
+            loadMoreQueue();
+          }
+        }
+      },
+      { rootMargin: '300px' }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadingMore, loadMoreQueue]);
 
   const handleAction = async (reviewId, action, note = '') => {
     try {
@@ -198,96 +373,200 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
         </div>
       </div>
 
-      {/* Tabs & Multi-Select Operations */}
-      <div className="bg-white rounded-2xl p-2.5 shadow-2xs border border-purple-200/80 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
-        
-        {/* Triage Tabs - Horizontal scrollbar completely hidden */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 md:pb-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden w-full md:w-auto">
-          <button
-            onClick={() => setActiveTab('pending')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 shrink-0 ${
-              activeTab === 'pending'
-                ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white font-semibold shadow-xs'
-                : 'text-purple-900/70 hover:bg-purple-50'
-            }`}
-          >
-            <span>Pending</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
-              activeTab === 'pending' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-800'
-            }`}>
-              {metrics.pending_count || 0}
-            </span>
-          </button>
+      {/* Moderation Control Hub: Tabs, Filters, Search & Bulk Actions */}
+      <div className="bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-4 shadow-2xs border border-purple-200/80 space-y-3">
+        {/* Row 1: Triage Tabs & Batch Operations */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5 pb-2.5 border-b border-purple-100">
+          {/* Triage Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 md:pb-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden w-full md:w-auto">
+            <button
+              onClick={() => setActiveTab('pending')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'pending'
+                  ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white font-semibold shadow-xs'
+                  : 'text-purple-900/70 hover:bg-purple-50'
+              }`}
+            >
+              <span>Pending</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
+                activeTab === 'pending' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-800'
+              }`}>
+                {metrics.pending_count || 0}
+              </span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('approved')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 shrink-0 ${
-              activeTab === 'approved'
-                ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white font-semibold shadow-xs'
-                : 'text-purple-900/70 hover:bg-purple-50'
-            }`}
-          >
-            <span>Approved</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
-              activeTab === 'approved' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-800'
-            }`}>
-              {metrics.approved_count || 0}
-            </span>
-          </button>
+            <button
+              onClick={() => setActiveTab('approved')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'approved'
+                  ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white font-semibold shadow-xs'
+                  : 'text-purple-900/70 hover:bg-purple-50'
+              }`}
+            >
+              <span>Approved</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
+                activeTab === 'approved' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-800'
+              }`}>
+                {metrics.approved_count || 0}
+              </span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('rejected')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 shrink-0 ${
-              activeTab === 'rejected'
-                ? 'bg-gradient-to-r from-rose-600 to-red-600 text-white font-semibold shadow-xs'
-                : 'text-purple-900/70 hover:bg-purple-50'
-            }`}
-          >
-            <span>Rejected</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
-              activeTab === 'rejected' ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-700 border border-rose-200'
-            }`}>
-              {metrics.rejected_count ?? 0}
-            </span>
-          </button>
+            <button
+              onClick={() => setActiveTab('rejected')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'rejected'
+                  ? 'bg-gradient-to-r from-rose-600 to-red-600 text-white font-semibold shadow-xs'
+                  : 'text-purple-900/70 hover:bg-purple-50'
+              }`}
+            >
+              <span>Rejected</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
+                activeTab === 'rejected' ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-700 border border-rose-200'
+              }`}>
+                {metrics.rejected_count ?? 0}
+              </span>
+            </button>
+          </div>
+
+          {/* Batch Operations Bar */}
+          <div className="flex items-center justify-between sm:justify-end gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-purple-100 w-full md:w-auto">
+            {reviews.length > 0 && (
+              <button
+                onClick={toggleSelectAll}
+                className="text-xs text-purple-700 hover:text-purple-950 font-medium px-2.5 py-1 rounded-lg hover:bg-purple-50 transition-colors cursor-pointer"
+              >
+                {selectedIds.length === reviews.length ? 'Deselect All' : 'Select All'}
+              </button>
+            )}
+
+            {selectedIds.length > 0 && (
+              <div className="flex items-center gap-1.5 pl-2 border-l border-purple-200">
+                <span className="text-xs font-bold text-purple-900 px-1">
+                  {selectedIds.length} chosen
+                </span>
+                <button
+                  onClick={() => handleBulkAction('approve')}
+                  className="px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
+                >
+                  Approve
+                </button>
+                <button
+                  onClick={() => handleBulkAction('reject')}
+                  className="px-2.5 py-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
+                >
+                  Reject
+                </button>
+                <button
+                  onClick={handleBulkDelete}
+                  className="px-2.5 py-1 rounded-xl bg-red-700 hover:bg-red-800 text-white text-xs font-semibold shadow-xs cursor-pointer"
+                >
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Batch Operations Bar */}
-        <div className="flex items-center justify-between sm:justify-end gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-purple-100 w-full md:w-auto">
-          {reviews.length > 0 && (
-            <button
-              onClick={toggleSelectAll}
-              className="text-xs text-purple-700 hover:text-purple-950 font-medium px-2.5 py-1 rounded-lg hover:bg-purple-50 transition-colors cursor-pointer"
-            >
-              {selectedIds.length === reviews.length ? 'Deselect All' : 'Select All'}
-            </button>
-          )}
+        {/* Row 2: Product, Channel, Rating Dropdowns & Search */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-2 flex-1">
+            {/* Shoe / Product Filter */}
+            <CustomDropdown
+              value={selectedSku}
+              onChange={setSelectedSku}
+              options={[
+                { value: '', label: 'All Shoes & Models' },
+                ...distinctProducts.map((p) => ({
+                  value: p.sku,
+                  label: formatProductLabel(p)
+                }))
+              ]}
+              icon="steps"
+              className="w-full sm:w-auto"
+            />
 
-          {selectedIds.length > 0 && (
-            <div className="flex items-center gap-1.5 pl-2 border-l border-purple-200">
-              <span className="text-xs font-bold text-purple-900 px-1">
-                {selectedIds.length} chosen
-              </span>
+            {/* Sales Channel Selector */}
+            <CustomDropdown
+              value={selectedChannel}
+              onChange={setSelectedChannel}
+              options={[
+                { value: '', label: 'All Channels' },
+                ...distinctChannels.map((ch) => ({
+                  value: ch,
+                  label: ch
+                }))
+              ]}
+              icon="storefront"
+              className="w-full sm:w-auto"
+            />
+
+            {/* Star Rating Selector */}
+            <CustomDropdown
+              value={selectedRating !== null ? String(selectedRating) : ''}
+              onChange={(val) => setSelectedRating(val ? Number(val) : null)}
+              options={[
+                { value: '', label: 'All Star Ratings' },
+                { value: '5', label: '5 Stars ★★★★★' },
+                { value: '4', label: '4 Stars ★★★★' },
+                { value: '3', label: '3 Stars ★★★' },
+                { value: '2', label: '2 Stars ★★' },
+                { value: '1', label: '1 Star ★' }
+              ]}
+              icon="star"
+              className="w-full sm:w-auto"
+            />
+
+            {/* Reset Filters Pill */}
+            {(selectedSku || selectedChannel || selectedRating !== null || localSearch || searchQuery) && (
               <button
-                onClick={() => handleBulkAction('approve')}
-                className="px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
+                type="button"
+                onClick={() => {
+                  setSelectedSku('');
+                  setSelectedChannel('');
+                  setSelectedRating(null);
+                  handleClearSearch();
+                }}
+                className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold border border-purple-200 transition-colors cursor-pointer shrink-0"
+                title="Reset queue filters"
               >
-                Approve
+                <span className="material-symbols-outlined text-[14px]">close</span>
+                <span>Reset</span>
               </button>
+            )}
+          </div>
+
+          {/* Dedicated Search Input for Queue */}
+          <div className="relative w-full sm:w-56 shrink-0">
+            <input
+              type="text"
+              value={localSearch || searchQuery}
+              onChange={(e) => setLocalSearch(e.target.value)}
+              placeholder="Search reviews..."
+              className="w-full h-8.5 sm:h-9 pl-8 pr-8 rounded-xl bg-purple-50/70 border border-purple-200 text-xs text-slate-800 focus:outline-none focus:bg-white focus:border-[#5122fe] transition-all placeholder:text-purple-300 font-medium"
+            />
+            <span className="material-symbols-outlined absolute left-2.5 top-2.5 text-purple-400 text-[15px] pointer-events-none select-none">
+              search
+            </span>
+            {(localSearch || searchQuery) && (
               <button
-                onClick={() => handleBulkAction('reject')}
-                className="px-2.5 py-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleClearSearch();
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleClearSearch();
+                }}
+                className="absolute right-1 top-1 w-7 h-7 flex items-center justify-center text-purple-400 hover:text-purple-700 cursor-pointer z-30 rounded-full hover:bg-purple-100 transition-colors"
+                title="Clear search"
               >
-                Reject
+                <span className="material-symbols-outlined text-[15px] pointer-events-none select-none">close</span>
               </button>
-              <button
-                onClick={handleBulkDelete}
-                className="px-2.5 py-1 rounded-xl bg-red-700 hover:bg-red-800 text-white text-xs font-semibold shadow-xs cursor-pointer"
-              >
-                Delete
-              </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
@@ -485,6 +764,29 @@ export default function AdminModerationQueue({ showToast, onQueueUpdated, search
               </div>
             );
           })
+        )}
+
+        {/* Loading More Spinner (Throttled Infinite Scroll) */}
+        {loadingMore && (
+          <div className="flex items-center justify-center py-6 gap-2 text-xs text-purple-700 font-semibold bg-white/70 rounded-2xl border border-purple-100 shadow-2xs animate-pulse">
+            <span className="material-symbols-outlined text-base animate-spin text-[#5122fe]">progress_activity</span>
+            <span>Loading more moderation items...</span>
+          </div>
+        )}
+
+        {/* Infinite Scroll Sentinel element */}
+        <div ref={sentinelRef} className="h-4 w-full pointer-events-none opacity-0" />
+
+        {/* End of list confirmation */}
+        {!hasMore && !loading && reviews.length > 0 && (
+          <div className="flex items-center justify-center py-6 text-xs text-purple-900/40 gap-2">
+            <span className="w-12 h-px bg-purple-200"></span>
+            <span className="flex items-center gap-1 font-medium">
+              <span className="material-symbols-outlined text-[15px] text-purple-400">check_circle</span>
+              All {reviews.length} reviews loaded
+            </span>
+            <span className="w-12 h-px bg-purple-200"></span>
+          </div>
         )}
       </div>
 

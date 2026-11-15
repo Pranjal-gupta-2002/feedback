@@ -44,17 +44,29 @@ export default function Navbar({ onSearch, searchQuery }) {
                   onChange={(e) => onSearch?.(e.target.value)}
                   placeholder="Search sneaker reviews..."
                   onBlur={() => !searchQuery && setSearchOpen(false)}
-                  className="w-44 sm:w-64 h-8 pl-8 pr-7 rounded-full bg-purple-50/80 border border-purple-200 text-xs text-slate-800 focus:outline-none focus:bg-white focus:border-[#5122fe] transition-all placeholder:text-purple-300 font-medium"
+                  className="w-44 sm:w-64 h-8 pl-8 pr-8 rounded-full bg-purple-50/80 border border-purple-200 text-xs text-slate-800 focus:outline-none focus:bg-white focus:border-[#5122fe] transition-all placeholder:text-purple-300 font-medium"
                 />
-                <span className="material-symbols-outlined absolute left-2.5 text-purple-400 text-[15px]">
+                <span className="material-symbols-outlined absolute left-2.5 text-purple-400 text-[15px] pointer-events-none select-none">
                   search
                 </span>
                 <button
                   type="button"
-                  onClick={() => { onSearch?.(''); setSearchOpen(false); }}
-                  className="absolute right-2 text-purple-400 hover:text-purple-700 cursor-pointer"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onSearch?.('');
+                    setSearchOpen(false);
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onSearch?.('');
+                    setSearchOpen(false);
+                  }}
+                  className="absolute right-1 w-7 h-7 flex items-center justify-center text-purple-400 hover:text-purple-700 cursor-pointer z-30 rounded-full hover:bg-purple-100 transition-colors"
+                  title="Clear search"
                 >
-                  <span className="material-symbols-outlined text-[15px]">close</span>
+                  <span className="material-symbols-outlined text-[15px] pointer-events-none select-none">close</span>
                 </button>
               </div>
             ) : (

@@ -26,7 +26,11 @@ def get_moderation_queue(
     tab: str = Query("pending", pattern="^(pending|approved|flagged|escalated|rejected|all)$"),
     search: Optional[str] = Query(None),
     sku: Optional[str] = Query(None),
-    min_toxicity: Optional[float] = Query(None)
+    channel: Optional[str] = Query(None),
+    rating: Optional[int] = Query(None, ge=1, le=5),
+    min_toxicity: Optional[float] = Query(None),
+    limit: Optional[int] = Query(None, ge=1, le=100),
+    offset: int = Query(0, ge=0)
 ):
     # Overall queue counter metrics from MongoDB
     pending_count = reviews_col.count_documents({"status": "pending"})
@@ -36,27 +40,33 @@ def get_moderation_queue(
     rejected_count = reviews_col.count_documents({"status": "rejected"})
     total_count = reviews_col.count_documents({})
 
-    filter_q = {}
+    conditions = []
     if tab != "all":
-        filter_q["status"] = tab
-
+        conditions.append({"status": tab})
     if sku:
-        filter_q["sku"] = sku
-
+        conditions.append({"sku": sku})
+    if channel:
+        conditions.append({"channel": channel})
+    if rating is not None:
+        conditions.append({"rating": rating})
     if min_toxicity is not None:
-        filter_q["toxicity_score"] = {"$gte": min_toxicity}
+        conditions.append({"toxicity_score": {"$gte": min_toxicity}})
 
     if search:
         search_escaped = re.escape(search)
         regex = {"$regex": search_escaped, "$options": "i"}
-        filter_q["$or"] = [
-            {"title": regex},
-            {"body": regex},
-            {"customer_name": regex},
-            {"sku": regex},
-            {"product_name": regex},
-            {"tags": regex}
-        ]
+        conditions.append({
+            "$or": [
+                {"title": regex},
+                {"body": regex},
+                {"customer_name": regex},
+                {"sku": regex},
+                {"product_name": regex},
+                {"tags": regex}
+            ]
+        })
+
+    filter_q = {"$and": conditions} if conditions else {}
 
     # Sort priority: highest toxicity and newest first
     if tab == "flagged":
@@ -65,6 +75,10 @@ def get_moderation_queue(
         sort_spec = [("created_at", -1)]
 
     cursor = reviews_col.find(filter_q).sort(sort_spec)
+    if offset > 0:
+        cursor = cursor.skip(offset)
+    if limit is not None:
+        cursor = cursor.limit(limit)
     reviews_list = [serialize_doc(doc) for doc in cursor]
 
     # Calculate real SLA turnaround from moderated reviews (fetch only timestamp fields)

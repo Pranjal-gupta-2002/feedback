@@ -1,6 +1,11 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { api } from '../api/client';
 import SubmitReview from './SubmitReview';
+import CustomDropdown from '../components/CustomDropdown';
+import { useDebounce } from '../hooks/useDebounce';
+import { throttle } from '../utils/throttle';
+
+const PAGE_SIZE = 6;
 
 const DEFAULT_CHANNELS = [
   'Direct Web',
@@ -10,88 +15,13 @@ const DEFAULT_CHANNELS = [
   'In-App iOS'
 ];
 
-/**
- * Custom Dropdown matching the app's purple glassmorphic theme.
- * Replaces the Windows native OS blue select dropdown with a sleek, rounded UI.
- */
-function CustomDropdown({ value, onChange, options, icon = null, className = '' }) {
-  const [open, setOpen] = useState(false);
-  const dropdownRef = useRef(null);
-
-  useEffect(() => {
-    function handleClickOutside(e) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const selectedOption = options.find((opt) => opt.value === value);
-  const displayLabel = selectedOption ? selectedOption.label : (options[0]?.label || 'Select...');
-
-  return (
-    <div className={`relative inline-block text-left ${className}`} ref={dropdownRef}>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className={`h-8.5 sm:h-9 px-2.5 sm:px-3 rounded-xl border text-[11px] sm:text-xs font-semibold flex items-center justify-between sm:justify-start gap-1 sm:gap-1.5 transition-all cursor-pointer shadow-2xs select-none w-full ${
-          open
-            ? 'bg-purple-100/90 border-purple-400 text-purple-950 ring-2 ring-purple-400/25'
-            : value
-            ? 'bg-purple-100/70 border-purple-300 text-purple-950 hover:bg-purple-100'
-            : 'bg-purple-50/70 hover:bg-purple-100/80 border-purple-200 text-purple-900/80 hover:text-purple-950'
-        }`}
-      >
-        <div className="flex items-center gap-1.5 min-w-0">
-          {icon && <span className="material-symbols-outlined text-[14px] sm:text-[15px] text-purple-600 shrink-0">{icon}</span>}
-          <span className="truncate max-w-[100px] sm:max-w-[170px]">{displayLabel}</span>
-        </div>
-        <span className={`material-symbols-outlined text-[15px] sm:text-[16px] text-purple-600 transition-transform duration-200 shrink-0 ${open ? 'rotate-180' : ''}`}>
-          expand_more
-        </span>
-      </button>
-
-      {open && (
-        <div className="absolute left-0 z-50 mt-1.5 min-w-[190px] max-w-[280px] p-1.5 bg-white rounded-2xl border border-purple-200 shadow-xl shadow-purple-500/10 backdrop-blur-md">
-          <div className="max-h-60 overflow-y-auto scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden space-y-0.5">
-            {options.map((opt) => {
-              const isSelected = opt.value === value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => {
-                    onChange(opt.value);
-                    setOpen(false);
-                  }}
-                  className={`w-full px-3 py-2 rounded-xl text-left text-xs font-medium flex items-center justify-between gap-2 transition-colors cursor-pointer ${
-                    isSelected
-                      ? 'bg-purple-100 text-purple-950 font-bold'
-                      : 'text-purple-900/80 hover:bg-purple-50 hover:text-purple-950'
-                  }`}
-                >
-                  <span className="truncate">{opt.label}</span>
-                  {isSelected && (
-                    <span className="material-symbols-outlined text-[15px] text-purple-700 font-bold">
-                      check
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQuery = '' }) {
+export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQuery = '', onSearch }) {
   const [reviews, setReviews] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const sentinelRef = useRef(null);
   const [selectedRating, setSelectedRating] = useState(null);
   const [channels, setChannels] = useState(DEFAULT_CHANNELS);
   const [selectedChannel, setSelectedChannel] = useState('');
@@ -103,7 +33,13 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
   const [lightbox, setLightbox] = useState(null);
   const [writeModalOpen, setWriteModalOpen] = useState(false);
 
+  const handleClearSearch = () => {
+    setLocalSearch('');
+    onSearch?.('');
+  };
+
   const effectiveSearch = searchQuery || localSearch;
+  const debouncedSearch = useDebounce(effectiveSearch, 350);
 
   // 1. Fetch static metadata (channels & products catalog) once on mount
   useEffect(() => {
@@ -172,7 +108,7 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
     loadSummary(selectedChannel, selectedSku);
   }, [selectedChannel, selectedSku]);
 
-  // 3. Fetch reviews list whenever rating, channel, shoe/sku, sort, or search changes
+  // 3. Fetch reviews list whenever rating, channel, shoe/sku, sort, or search changes (debounced)
   const loadReviews = async () => {
     try {
       setLoading(true);
@@ -182,9 +118,13 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
         channel: selectedChannel || undefined,
         sku: selectedSku || undefined,
         sort: sortBy,
-        search: effectiveSearch || undefined
+        search: debouncedSearch || undefined,
+        limit: PAGE_SIZE,
+        offset: 0
       });
-      setReviews(revs);
+      const items = revs || [];
+      setReviews(items);
+      setHasMore(items.length >= PAGE_SIZE);
     } catch (err) {
       console.error(err);
       showToast?.('Error loading customer reviews', 'error');
@@ -195,7 +135,87 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
 
   useEffect(() => {
     loadReviews();
-  }, [selectedRating, selectedChannel, selectedSku, sortBy, effectiveSearch]);
+  }, [selectedRating, selectedChannel, selectedSku, sortBy, debouncedSearch]);
+
+  // Load next batch of reviews (Infinite Scroll)
+  const loadMoreReviews = useCallback(async () => {
+    if (loading || loadingMore || !hasMore) return;
+    try {
+      setLoadingMore(true);
+      const currentOffset = reviews.length;
+      const nextBatch = await api.getReviews({
+        status: 'approved',
+        rating: selectedRating || undefined,
+        channel: selectedChannel || undefined,
+        sku: selectedSku || undefined,
+        sort: sortBy,
+        search: debouncedSearch || undefined,
+        limit: PAGE_SIZE,
+        offset: currentOffset
+      });
+
+      if (!nextBatch || nextBatch.length === 0) {
+        setHasMore(false);
+      } else {
+        setReviews(prev => {
+          const existingIds = new Set(prev.map(r => r.id));
+          const filteredNew = nextBatch.filter(r => !existingIds.has(r.id));
+          return [...prev, ...filteredNew];
+        });
+        if (nextBatch.length < PAGE_SIZE) {
+          setHasMore(false);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load more reviews:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loading, loadingMore, hasMore, reviews.length, selectedRating, selectedChannel, selectedSku, sortBy, debouncedSearch]);
+
+  // Throttled window scroll listener for infinite scroll
+  useEffect(() => {
+    if (!hasMore || loading || loadingMore) return;
+
+    const handleScroll = throttle(() => {
+      const scrollPosition = window.innerHeight + window.scrollY;
+      const threshold = document.documentElement.scrollHeight - 350;
+
+      if (scrollPosition >= threshold) {
+        loadMoreReviews();
+      }
+    }, 250);
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      handleScroll.cancel();
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, [hasMore, loading, loadingMore, loadMoreReviews]);
+
+  // Throttled IntersectionObserver on sentinel
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !hasMore || loading || loadingMore) return;
+
+    let lastTriggerTime = 0;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (first.isIntersecting) {
+          const now = Date.now();
+          if (now - lastTriggerTime > 300) {
+            lastTriggerTime = now;
+            loadMoreReviews();
+          }
+        }
+      },
+      { rootMargin: '300px' }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadingMore, loadMoreReviews]);
 
   // 4. Full refresh triggered by the manual Refresh button or review submission
   const handleFullRefresh = async () => {
@@ -208,7 +228,9 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
           channel: selectedChannel || undefined,
           sku: selectedSku || undefined,
           sort: sortBy,
-          search: effectiveSearch || undefined
+          search: debouncedSearch || undefined,
+          limit: PAGE_SIZE,
+          offset: 0
         }),
         api.getReviewsSummary({
           channel: selectedChannel || undefined,
@@ -216,7 +238,9 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
         }),
         api.getMetadata()
       ]);
-      setReviews(revs);
+      const items = revs || [];
+      setReviews(items);
+      setHasMore(items.length >= PAGE_SIZE);
       setSummary(sum);
       if (meta?.channels && meta.channels.length > 0) setChannels(meta.channels);
       if (meta?.products && meta.products.length > 0) setProducts(meta.products);
@@ -237,21 +261,6 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
     } catch (err) {
       showToast?.('Could not record vote', 'error');
     }
-  };
-
-  const exportAudit = () => {
-    const csvContent = "data:text/csv;charset=utf-8,"
-      + ["ID,Title,Rating,Customer,SKU,Product,Channel,Photos,Status,Created At"]
-      + "\n"
-      + reviews.map(r => `"${r.id}","${r.title.replace(/"/g, '""')}","${r.rating}","${r.customer_name}","${r.sku}","${r.product_name}","${r.channel}","${(r.images || []).length}","${r.status}","${r.created_at}"`).join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `shoe_reviews_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showToast?.('Exported shoe reviews CSV', 'success');
   };
 
   // Filter for photos only
@@ -325,13 +334,6 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
               >
                 <span className="material-symbols-outlined text-[16px]">rate_review</span>
                 Write Review with Photos
-              </button>
-              <button
-                onClick={exportAudit}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-50 text-purple-700 text-xs font-medium hover:bg-purple-100 border border-purple-200/80 transition-colors"
-              >
-                <span className="material-symbols-outlined text-[15px] text-purple-500">download</span>
-                Export CSV
               </button>
             </div>
           </div>
@@ -556,11 +558,11 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
             {effectiveSearch && (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-purple-100 text-purple-900 font-medium text-[11px]">
                 <span>Search: "{effectiveSearch}"</span>
-                <button onClick={() => setLocalSearch('')} className="hover:text-purple-600 font-bold cursor-pointer">×</button>
+                <button onClick={handleClearSearch} className="hover:text-purple-600 font-bold cursor-pointer">×</button>
               </span>
             )}
             <button
-              onClick={() => { setSelectedRating(null); setSelectedChannel(''); setSelectedSku(''); setPhotosOnly(false); setLocalSearch(''); }}
+              onClick={() => { setSelectedRating(null); setSelectedChannel(''); setSelectedSku(''); setPhotosOnly(false); handleClearSearch(); }}
               className="text-[11px] text-purple-700 hover:text-purple-950 underline ml-1 cursor-pointer font-medium"
             >
               Clear all
@@ -743,6 +745,29 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
               </div>
             );
           })
+        )}
+
+        {/* Loading More Spinner (Throttled Infinite Scroll) */}
+        {loadingMore && (
+          <div className="flex items-center justify-center py-6 gap-2 text-xs text-purple-700 font-semibold bg-white/70 rounded-2xl border border-purple-100 shadow-2xs animate-pulse">
+            <span className="material-symbols-outlined text-base animate-spin text-[#5122fe]">progress_activity</span>
+            <span>Loading more shoe reviews...</span>
+          </div>
+        )}
+
+        {/* Infinite Scroll Sentinel element */}
+        <div ref={sentinelRef} className="h-4 w-full pointer-events-none opacity-0" />
+
+        {/* End of list confirmation */}
+        {!hasMore && !loading && displayedReviews.length > 0 && (
+          <div className="flex items-center justify-center py-6 text-xs text-purple-900/40 gap-2">
+            <span className="w-12 h-px bg-purple-200"></span>
+            <span className="flex items-center gap-1 font-medium">
+              <span className="material-symbols-outlined text-[15px] text-purple-400">check_circle</span>
+              All {displayedReviews.length} reviews loaded
+            </span>
+            <span className="w-12 h-px bg-purple-200"></span>
+          </div>
         )}
       </div>
 
