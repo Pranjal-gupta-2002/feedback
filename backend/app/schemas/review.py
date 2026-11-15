@@ -89,6 +89,11 @@ class ProductSchema(BaseModel):
     attribute: Optional[str] = ""
     icon: Optional[str] = "steps"
 
+class MetadataResponse(BaseModel):
+    products: List[ProductSchema]
+    tags: List[str]
+    channels: List[str]
+
 class AnalyticsOverview(BaseModel):
     total_reviews: int
     average_rating: float

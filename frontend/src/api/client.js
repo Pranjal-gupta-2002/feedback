@@ -170,24 +170,8 @@ export const api = {
     return request('/api/analytics/overview');
   },
 
-  // Products
-  getProducts: () => {
-    return request('/api/products');
-  },
-
-  createProduct: (productData) => {
-    return request('/api/products', {
-      method: 'POST',
-      body: JSON.stringify(productData)
-    });
-  },
-
-  // Tags & Channels from MongoDB
-  getTags: () => {
-    return request('/api/tags');
-  },
-
-  getChannels: () => {
-    return request('/api/channels');
+  // Metadata (Unified products, tags, and sales channels in a single round-trip)
+  getMetadata: () => {
+    return request('/api/metadata');
   }
 };

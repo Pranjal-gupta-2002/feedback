@@ -66,27 +66,38 @@ jobs:
           # Update nginx proxy_pass with the live backend URL
           sed -i "s|BACKEND_URL_PLACEHOLDER|${{ env.LIVE_API_URL }}|g" ./frontend/nginx.conf || true
 
-      # 6. Build and Push Frontend Docker image
-      - name: Build and Push Frontend to Docker Hub
+      # 6. Build and Push Frontend Docker image to GCR and Docker Hub
+      - name: Build and Push Frontend Docker Image
         run: |
-          IMAGE_TAG="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          LATEST_TAG="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest"
+          gcloud auth configure-docker --quiet
+          PROJECT_ID=$(gcloud config get-value project)
+          GCR_TAG="gcr.io/${PROJECT_ID}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          GCR_LATEST="gcr.io/${PROJECT_ID}/${{ env.IMAGE_NAME }}:latest"
+          DH_TAG="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          DH_LATEST="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest"
 
-          docker build -t $IMAGE_TAG -t $LATEST_TAG ./frontend
-          docker push $IMAGE_TAG
-          docker push $LATEST_TAG
+          docker build \
+            -t "$GCR_TAG" \
+            -t "$GCR_LATEST" \
+            -t "$DH_TAG" \
+            -t "$DH_LATEST" \
+            ./frontend
 
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          # Push to GCR (Google Cloud native registry - guarantees Cloud Run deployment succeeds)
+          docker push "$GCR_TAG"
+          docker push "$GCR_LATEST"
 
-          # Wait for Docker Hub CDN and Google mirror.gcr.io to sync the new tag
-          echo "Waiting 60s for Docker Hub CDN propagation..."
-          sleep 60
+          # Also push to Docker Hub (optional backup)
+          docker push "$DH_TAG" || true
+          docker push "$DH_LATEST" || true
+
+          echo "IMAGE_TAG=$GCR_TAG" >> $GITHUB_ENV
 
       # 7. Deploy to Google Cloud Run
       - name: Deploy Frontend to Cloud Run
         run: |
           gcloud run deploy ${{ env.FE_SERVICE_NAME }} \
-            --image ${{ env.IMAGE_TAG }} \
+            --image "${{ env.IMAGE_TAG }}" \
             --region ${{ env.GCP_REGION }} \
             --port 80 \
             --platform managed \
@@ -100,6 +111,21 @@ jobs:
           echo "=========================================="
           echo "Frontend successfully deployed to: ${URL}"
           echo "=========================================="
+
+      # 8. Auto-clean old images in GCR to keep storage under 50MB (well below 500MB cap)
+      - name: Prune Old Images from GCR
+        if: success()
+        run: |
+          PROJECT_ID=$(gcloud config get-value project)
+          echo "Pruning older image revisions to maintain minimal storage..."
+          gcloud container images list-tags "gcr.io/${PROJECT_ID}/${{ env.IMAGE_NAME }}" \
+            --filter="NOT tags:latest AND NOT tags:${{ github.sha }}" \
+            --format="get(digest)" | while read -r digest; do
+              if [ -n "$digest" ]; then
+                echo "Removing previous digest: $digest"
+                gcloud container images delete "gcr.io/${PROJECT_ID}/${{ env.IMAGE_NAME }}@${digest}" --quiet --force-delete-tags || true
+              fi
+          done
 
       - name: Fetch Cloud Run Diagnostic Logs
         if: failure()

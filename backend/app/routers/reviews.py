@@ -3,8 +3,8 @@ import re
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query, status
 from bson import ObjectId
-from ..database import reviews_col, moderation_rules_col, products_col, tags_col, channels_col, serialize_doc
-from ..schemas.review import ReviewCreate, ReviewUpdate, ReviewResponse, VoteAction, ProductSchema
+from ..database import reviews_col, moderation_rules_col, serialize_doc
+from ..schemas.review import ReviewCreate, ReviewUpdate, ReviewResponse, VoteAction
 from ..services.ai_trust import analyze_review_trust
 
 router = APIRouter(prefix="/reviews", tags=["Reviews"])
@@ -131,34 +131,6 @@ def submit_review(review_in: ReviewCreate):
         )
         
     return serialize_doc(doc)
-
-@router.get("/products", response_model=List[ProductSchema])
-def get_products():
-    """Retrieve catalog of reviewable products."""
-    products = list(products_col.find({}, {"_id": 0}))
-    return products
-
-@router.post("/products", response_model=ProductSchema, status_code=status.HTTP_201_CREATED)
-def create_product(product: ProductSchema):
-    """Add a new product to the catalog."""
-    products_col.update_one(
-        {"sku": product.sku},
-        {"$set": product.dict()},
-        upsert=True
-    )
-    return product
-
-@router.get("/tags", response_model=List[str])
-def get_tags():
-    """Retrieve review tags directly from MongoDB Atlas."""
-    docs = list(tags_col.find({}, {"name": 1, "_id": 0}))
-    return [d["name"] for d in docs]
-
-@router.get("/channels", response_model=List[str])
-def get_channels():
-    """Retrieve sales channels directly from MongoDB Atlas."""
-    docs = list(channels_col.find({}, {"name": 1, "_id": 0}))
-    return [d["name"] for d in docs]
 
 @router.get("/{review_id}", response_model=ReviewResponse)
 def get_review(review_id: str):

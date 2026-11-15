@@ -2,8 +2,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
-from .database import init_db, client, db, products_col, serialize_doc
-from .routers import reviews, moderation, analytics
+from .database import init_db, client, db, serialize_doc
+from .routers import reviews, moderation, analytics, metadata
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,28 +30,10 @@ app.add_middleware(
 )
 
 # Mount API routers
+app.include_router(metadata.router, prefix=settings.API_V1_STR)
 app.include_router(reviews.router, prefix=settings.API_V1_STR)
 app.include_router(moderation.router, prefix=settings.API_V1_STR)
 app.include_router(analytics.router, prefix=settings.API_V1_STR)
-
-@app.get("/api/products")
-def get_products():
-    """Top-level products endpoint for frontend selectors."""
-    return list(products_col.find({}, {"_id": 0}))
-
-@app.get("/api/tags")
-def get_tags():
-    """Retrieve review tags directly from MongoDB Atlas."""
-    from .database import tags_col
-    docs = list(tags_col.find({}, {"name": 1, "_id": 0}))
-    return [d["name"] for d in docs]
-
-@app.get("/api/channels")
-def get_channels():
-    """Retrieve sales channels directly from MongoDB Atlas."""
-    from .database import channels_col
-    docs = list(channels_col.find({}, {"name": 1, "_id": 0}))
-    return [d["name"] for d in docs]
 
 @app.get("/api/health")
 def healthcheck():

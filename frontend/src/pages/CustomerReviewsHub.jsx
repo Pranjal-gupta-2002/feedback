@@ -20,7 +20,7 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
   const loadData = async () => {
     try {
       setLoading(true);
-      const [revs, stats, chs] = await Promise.all([
+      const [revs, stats, meta] = await Promise.all([
         api.getReviews({
           status: 'approved',
           rating: selectedRating || undefined,
@@ -29,11 +29,11 @@ export default function CustomerReviewsHub({ onNavigateWrite, showToast, searchQ
           search: effectiveSearch || undefined
         }),
         api.getAnalyticsOverview(),
-        api.getChannels()
+        api.getMetadata()
       ]);
       setReviews(revs);
       setAnalytics(stats);
-      if (chs) setChannels(chs);
+      if (meta?.channels) setChannels(meta.channels);
     } catch (err) {
       console.error(err);
       showToast?.('Error loading customer reviews', 'error');

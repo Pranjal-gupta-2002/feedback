@@ -45,11 +45,11 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
   useEffect(() => {
     async function fetchFormMetadata() {
       try {
-        const [prods, tags, chs] = await Promise.all([
-          api.getProducts(),
-          api.getTags(),
-          api.getChannels()
-        ]);
+        // Fetch unified products, tags, and channels in a single round-trip
+        const meta = await api.getMetadata();
+        const prods = meta?.products || [];
+        const tags = meta?.tags || [];
+        const chs = meta?.channels || [];
         if (prods && prods.length > 0) {
           setProductsList(prods);
           setSelectedProduct(prods[0]);

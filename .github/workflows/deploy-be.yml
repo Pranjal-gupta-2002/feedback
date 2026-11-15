@@ -40,22 +40,32 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      # 4. Build and Push Backend Docker image, then resolve immutable digest
-      - name: Build and Push Backend to Docker Hub
+      # 4. Build and Push Backend Docker image to GCR and Docker Hub
+      - name: Build and Push Backend Docker Image
         run: |
-          REPO="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
-          SHA_TAG="$REPO:${{ github.sha }}"
-          LATEST_TAG="$REPO:latest"
+          gcloud auth configure-docker --quiet
+          PROJECT_ID=$(gcloud config get-value project)
+          GCR_TAG="gcr.io/${PROJECT_ID}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          GCR_LATEST="gcr.io/${PROJECT_ID}/${{ env.IMAGE_NAME }}:latest"
+          DH_TAG="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          DH_LATEST="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest"
 
-          docker build -t "$SHA_TAG" -t "$LATEST_TAG" ./backend
-          docker push "$SHA_TAG"
-          docker push "$LATEST_TAG"
+          docker build \
+            -t "$GCR_TAG" \
+            -t "$GCR_LATEST" \
+            -t "$DH_TAG" \
+            -t "$DH_LATEST" \
+            ./backend
 
-          # Deploy by digest to bypass mirror.gcr.io tag caching / "not found" errors
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$SHA_TAG")
-          DIGEST="docker.io/${DIGEST#docker.io/}"
-          echo "Deploying image by digest: $DIGEST"
-          echo "IMAGE_REF=$DIGEST" >> $GITHUB_ENV
+          # Push to GCR (Google Cloud native registry - guarantees Cloud Run deployment succeeds)
+          docker push "$GCR_TAG"
+          docker push "$GCR_LATEST"
+
+          # Also push to Docker Hub (optional backup)
+          docker push "$DH_TAG" || true
+          docker push "$DH_LATEST" || true
+
+          echo "IMAGE_REF=$GCR_TAG" >> $GITHUB_ENV
 
       # 5. Deploy to Google Cloud Run with GitHub Secrets
       - name: Deploy Backend to Cloud Run
@@ -80,6 +90,21 @@ jobs:
           echo "=========================================="
           echo "Backend successfully deployed to: ${URL}"
           echo "=========================================="
+
+      # 6. Auto-clean old images in GCR to keep storage minimal
+      - name: Prune Old Images from GCR
+        if: success()
+        run: |
+          PROJECT_ID=$(gcloud config get-value project)
+          echo "Pruning older backend image revisions to maintain minimal storage..."
+          gcloud container images list-tags "gcr.io/${PROJECT_ID}/${{ env.IMAGE_NAME }}" \
+            --filter="NOT tags:latest AND NOT tags:${{ github.sha }}" \
+            --format="get(digest)" | while read -r digest; do
+              if [ -n "$digest" ]; then
+                echo "Removing previous digest: $digest"
+                gcloud container images delete "gcr.io/${PROJECT_ID}/${{ env.IMAGE_NAME }}@${digest}" --quiet --force-delete-tags || true
+              fi
+          done
 
       - name: Fetch Cloud Run Diagnostic Logs
         if: failure()
