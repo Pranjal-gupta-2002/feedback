@@ -51,6 +51,8 @@ jobs:
           docker push $LATEST_TAG
 
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "Waiting 15s for Docker Hub CDN and Google mirror propagation..."
+          sleep 15
 
       # 5. Deploy to Google Cloud Run with GitHub Secrets
       - name: Deploy Backend to Cloud Run
