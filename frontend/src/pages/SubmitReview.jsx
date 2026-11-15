@@ -41,8 +41,9 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
   const [submittedResult, setSubmittedResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
 
-  // Load products, tags, and channels dynamically from MongoDB Atlas backend
+  // Load products, tags, and channels dynamically from MongoDB Atlas backend only when modal is open
   useEffect(() => {
+    if (!isOpen) return;
     async function fetchFormMetadata() {
       try {
         // Fetch unified products, tags, and channels in a single round-trip
@@ -70,7 +71,7 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
       }
     }
     fetchFormMetadata();
-  }, []);
+  }, [isOpen]);
 
   if (isOpen === false) return null;
 

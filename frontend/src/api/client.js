@@ -95,6 +95,8 @@ async function request(endpoint, options = {}) {
   }
 }
 
+let metadataPromise = null;
+
 export const api = {
   // Reviews
   getReviews: (params = {}) => {
@@ -184,8 +186,14 @@ export const api = {
     return request('/api/analytics/overview');
   },
 
-  // Metadata (Unified products, tags, and sales channels in a single round-trip)
-  getMetadata: () => {
-    return request('/api/metadata');
+  // Metadata (Unified products, tags, and sales channels in a single round-trip, deduplicated & cached)
+  getMetadata: (forceRefresh = false) => {
+    if (!metadataPromise || forceRefresh) {
+      metadataPromise = request('/api/metadata').catch((err) => {
+        metadataPromise = null;
+        throw err;
+      });
+    }
+    return metadataPromise;
   }
 };

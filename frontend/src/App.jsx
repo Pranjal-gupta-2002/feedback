@@ -21,7 +21,6 @@ function ProtectedStaffRoute({ children, targetPath, showToast }) {
 }
 
 function MainAppLayout() {
-  const [pendingCount, setPendingCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState(null);
 
@@ -32,23 +31,11 @@ function MainAppLayout() {
     }, 4000);
   };
 
-  const refreshPendingCount = async () => {
-    try {
-      const queue = await api.getModerationQueue({ tab: 'pending' });
-      setPendingCount(queue.metrics?.pending_count || 0);
-    } catch (_) {}
-  };
-
-  useEffect(() => {
-    refreshPendingCount();
-  }, []);
-
   return (
     <div className="min-h-screen bg-[#fcfaff] text-[#1a0f30] flex flex-col selection:bg-[#5122fe] selection:text-white font-sans overflow-x-hidden w-full max-w-[100vw]">
       
       {/* Floating Island Navigation */}
       <Navbar
-        pendingCount={pendingCount}
         onSearch={setSearchQuery}
         searchQuery={searchQuery}
       />
@@ -83,7 +70,6 @@ function MainAppLayout() {
               <ProtectedStaffRoute targetPath="/moderation" showToast={showToast}>
                 <AdminModerationQueue
                   showToast={showToast}
-                  onQueueUpdated={refreshPendingCount}
                   searchQuery={searchQuery}
                 />
               </ProtectedStaffRoute>
