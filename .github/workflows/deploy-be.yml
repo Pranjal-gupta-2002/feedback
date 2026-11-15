@@ -40,25 +40,28 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      # 4. Build and Push Backend Docker image
+      # 4. Build and Push Backend Docker image, then resolve immutable digest
       - name: Build and Push Backend to Docker Hub
         run: |
-          IMAGE_TAG="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          LATEST_TAG="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest"
+          REPO="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+          SHA_TAG="$REPO:${{ github.sha }}"
+          LATEST_TAG="$REPO:latest"
 
-          docker build -t $IMAGE_TAG -t $LATEST_TAG ./backend
-          docker push $IMAGE_TAG
-          docker push $LATEST_TAG
+          docker build -t "$SHA_TAG" -t "$LATEST_TAG" ./backend
+          docker push "$SHA_TAG"
+          docker push "$LATEST_TAG"
 
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-          echo "Waiting 15s for Docker Hub CDN and Google mirror propagation..."
-          sleep 15
+          # Deploy by digest to bypass mirror.gcr.io tag caching / "not found" errors
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$SHA_TAG")
+          DIGEST="docker.io/${DIGEST#docker.io/}"
+          echo "Deploying image by digest: $DIGEST"
+          echo "IMAGE_REF=$DIGEST" >> $GITHUB_ENV
 
       # 5. Deploy to Google Cloud Run with GitHub Secrets
       - name: Deploy Backend to Cloud Run
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image ${{ env.IMAGE_TAG }} \
+            --image "${{ env.IMAGE_REF }}" \
             --region ${{ env.GCP_REGION }} \
             --port 8080 \
             --memory 1Gi \
