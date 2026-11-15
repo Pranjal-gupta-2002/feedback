@@ -12,6 +12,11 @@ class Settings:
     MONGODB_URL: str = os.getenv("MONGODB_URL") or os.getenv("MONGODB_URI") or "mongodb://localhost:27017"
     DATABASE_NAME: str = os.getenv("DATABASE_NAME", "feedback_db")
     PORT: int = int(os.getenv("PORT", 8000))
+    CLOUDINARY_CLOUD_NAME: str = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+    CLOUDINARY_API_KEY: str = os.getenv("CLOUDINARY_API_KEY", "")
+    CLOUDINARY_API_SECRET: str = os.getenv("CLOUDINARY_API_SECRET", "")
+    CLOUDINARY_URL: str = os.getenv("CLOUDINARY_URL", "")
+
     CORS_ORIGINS: list = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",

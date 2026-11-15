@@ -91,7 +91,46 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
     }
   };
 
-  const handlePhotoUpload = (e) => {
+  // High-performance client-side image downscaling & compression via HTML5 Canvas
+  const compressImageFile = (file, maxWidth = 1000, maxHeight = 1000, quality = 0.8) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = reject;
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onerror = reject;
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+
+          // Proportional aspect ratio downscaling
+          if (width > maxWidth || height > maxHeight) {
+            if (width > height) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            } else {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Export lightweight, high-fidelity JPEG data URL (~40KB - 60KB)
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressedDataUrl);
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handlePhotoUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
@@ -108,26 +147,34 @@ export default function SubmitReview({ isOpen = true, onClose, onReviewSubmitted
         showToast?.('Only image files (JPG, PNG, WebP) are allowed.', 'error');
         return;
       }
-      if (file.size > 4 * 1024 * 1024) {
+      if (file.size > 10 * 1024 * 1024) {
         const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
-        const msg = `Photo "${file.name}" is too large (${sizeMb}MB). Please select images under 4MB each.`;
+        const msg = `Photo "${file.name}" is too large (${sizeMb}MB). Please select images under 10MB each.`;
         setErrorMessage(msg);
         showToast?.(msg, 'error');
         return;
       }
     }
 
-    filesToProcess.forEach(file => {
-
-      const reader = new FileReader();
-      reader.onload = (loadEvent) => {
+    for (const file of filesToProcess) {
+      try {
+        const compressedUrl = await compressImageFile(file);
         setPhotos(prev => {
           if (prev.length >= 6) return prev;
-          return [...prev, loadEvent.target.result];
+          return [...prev, compressedUrl];
         });
-      };
-      reader.readAsDataURL(file);
-    });
+      } catch (_) {
+        // Fallback to direct FileReader if canvas is unavailable
+        const reader = new FileReader();
+        reader.onload = (loadEvent) => {
+          setPhotos(prev => {
+            if (prev.length >= 6) return prev;
+            return [...prev, loadEvent.target.result];
+          });
+        };
+        reader.readAsDataURL(file);
+      }
+    }
 
     e.target.value = '';
     showToast?.(`Photo(s) added (${Math.min(6, photos.length + filesToProcess.length)}/6)`, 'success');

@@ -8,7 +8,8 @@ router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 @router.get("/overview", response_model=AnalyticsOverview)
 def get_analytics_overview():
-    all_reviews = list(reviews_col.find({}))
+    # Exclude heavy image data to keep analytics queries ultra-light and instantaneous
+    all_reviews = list(reviews_col.find({}, {"images": 0, "image_url": 0}))
     total = len(all_reviews)
 
     # Fetch products catalog
@@ -180,8 +181,13 @@ def get_analytics_overview():
     verified_count = sum(1 for r in all_reviews if r.get("verified_purchase"))
     verified_pct = round((verified_count / total) * 100, 1)
 
-    photo_count = sum(1 for r in all_reviews if (r.get("images") and len(r["images"]) > 0) or r.get("image_url"))
-    photo_pct = round((photo_count / total) * 100, 1)
+    photo_count = reviews_col.count_documents({
+        "$or": [
+            {"images.0": {"$exists": True, "$ne": None, "$ne": ""}},
+            {"image_url": {"$exists": True, "$ne": None, "$ne": ""}}
+        ]
+    })
+    photo_pct = round((photo_count / total) * 100, 1) if total > 0 else 0.0
 
     pending_count = sum(1 for r in all_reviews if r.get("status") == "pending")
     approved_count = sum(1 for r in all_reviews if r.get("status") == "approved")

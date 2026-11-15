@@ -67,8 +67,11 @@ def get_moderation_queue(
     cursor = reviews_col.find(filter_q).sort(sort_spec)
     reviews_list = [serialize_doc(doc) for doc in cursor]
 
-    # Calculate real SLA turnaround from moderated reviews
-    moderated_cursor = reviews_col.find({"moderated_at": {"$ne": None}, "created_at": {"$ne": None}})
+    # Calculate real SLA turnaround from moderated reviews (fetch only timestamp fields)
+    moderated_cursor = reviews_col.find(
+        {"moderated_at": {"$ne": None}, "created_at": {"$ne": None}},
+        {"moderated_at": 1, "created_at": 1}
+    )
     sla_times = []
     for doc in moderated_cursor:
         mod_at = doc.get("moderated_at")

@@ -28,6 +28,8 @@ class ReviewUpdate(BaseModel):
     status: Optional[str] = None
     customer_name: Optional[str] = None
     moderation_note: Optional[str] = None
+    images: Optional[List[str]] = None
+    image_url: Optional[str] = None
 
 class ReviewResponse(ReviewBase):
     id: str

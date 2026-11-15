@@ -6,6 +6,7 @@ from bson import ObjectId
 from ..database import reviews_col, moderation_rules_col, products_col, serialize_doc
 from ..schemas.review import ReviewCreate, ReviewUpdate, ReviewResponse, VoteAction, ReviewSummary
 from ..services.ai_trust import analyze_review_trust
+from ..services.storage import upload_review_image
 
 router = APIRouter(prefix="/reviews", tags=["Reviews"])
 
@@ -83,8 +84,9 @@ def submit_review(review_in: ReviewCreate):
     )
     
     now = datetime.datetime.utcnow()
-    images_list = (review_in.images or [])[:6]
-    image_url = review_in.image_url or (images_list[0] if images_list else None)
+    raw_images = (review_in.images or [])[:6]
+    images_list = [upload_review_image(img) for img in raw_images]
+    image_url = upload_review_image(review_in.image_url) if review_in.image_url else (images_list[0] if images_list else None)
     
     doc = {
         "title": review_in.title,
@@ -143,7 +145,8 @@ def get_reviews_summary(
     if channel:
         query["channel"] = channel
         
-    reviews = list(reviews_col.find(query))
+    # Exclude image blobs to keep summary calculations sub-millisecond fast
+    reviews = list(reviews_col.find(query, {"images": 0, "image_url": 0}))
     total = len(reviews)
     
     if total == 0:
@@ -162,7 +165,13 @@ def get_reviews_summary(
     verified_count = sum(1 for r in reviews if r.get("verified_purchase"))
     verified_pct = round((verified_count / total) * 100, 1)
     
-    photo_count = sum(1 for r in reviews if (r.get("images") and len(r["images"]) > 0) or r.get("image_url"))
+    photo_count = reviews_col.count_documents({
+        **query,
+        "$or": [
+            {"images.0": {"$exists": True, "$ne": None, "$ne": ""}},
+            {"image_url": {"$exists": True, "$ne": None, "$ne": ""}}
+        ]
+    })
     photo_pct = round((photo_count / total) * 100, 1)
     
     recommend_count = sum(1 for r in reviews if r.get("recommend", True) or r.get("rating", 0) >= 4)
@@ -232,6 +241,11 @@ def update_review(review_id: str, review_in: ReviewUpdate):
         update_fields["customer_name"] = review_in.customer_name.strip()
     if review_in.moderation_note is not None:
         update_fields["moderation_note"] = review_in.moderation_note.strip()
+    if review_in.images is not None:
+        raw_imgs = (review_in.images or [])[:6]
+        uploaded_imgs = [upload_review_image(img) for img in raw_imgs]
+        update_fields["images"] = uploaded_imgs
+        update_fields["image_url"] = uploaded_imgs[0] if uploaded_imgs else None
 
     now = datetime.datetime.utcnow()
     update_fields["updated_at"] = now
