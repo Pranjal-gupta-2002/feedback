@@ -59,7 +59,7 @@ def init_db():
         ])
 
         from .services.seed_data import seed_database
-        seed_database(force=False)
+        seed_database()
 
         print(f"MongoDB successfully initialized. Connected to: {settings.DATABASE_NAME}")
     except Exception as e:
